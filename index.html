@@ -53,7 +53,7 @@
                 <div class="user-info">
                     <div class="user-avatar" id="user-avatar">A</div>
                     <div class="user-details">
-                        <span id="user-name-display">Usuário</span>
+                        <span id="user-name-display">Usuario</span>
                         <span id="user-role-display" class="role-badge">Perfil</span>
                     </div>
                 </div>
@@ -83,12 +83,12 @@
     <!-- TOAST NOTIFICATIONS -->
     <div id="toast-container"></div>
 
+    <!-- SCRIPTS NA ORDEM CORRETA -->
     <script src="app-bundle.js"></script>
+    <script src="github-auto.js"></script>
     <script>
-    // INICIALIZAÇÃO SEGURA - garante dados antes de mostrar tela
     (async function() {
         try {
-            // Carregar config GitHub se existir
             var ghConfig = localStorage.getItem('rhdesk_github_config');
             if (ghConfig) {
                 var config = JSON.parse(ghConfig);
@@ -98,12 +98,10 @@
             }
         } catch(e) { console.error('Config GitHub erro:', e); }
 
-        // Inicializar banco
         try {
             await db.init();
         } catch(e) { console.error('DB init erro:', e); }
 
-        // Garantir dados padrão SEMPRE
         if (!db.data.users || db.data.users.length === 0) {
             db.createDefaultData();
             db.saveToLocal();
@@ -117,31 +115,21 @@
             db.saveToLocal();
         }
 
-        console.log('RH Desk pronto - Users:', db.data.users.length, '| Catalog:', db.data.catalog.categories.length, '| SLA:', db.data.sla.length);
+        console.log('RH Desk pronto - Users:', db.data.users.length);
 
-        // Esconder loading
         document.getElementById('loading-screen').style.display = 'none';
 
-        // Verificar sessão ou mostrar login
         if (checkSession()) {
             showMainApp();
         } else {
             showLoginScreen();
         }
 
-        // Auto-sync
         setInterval(async function() {
             if (db.useGitHub && currentUser) {
                 try { await db.syncFromGitHub(); } catch(e) {}
             }
         }, 5 * 60 * 1000);
-    })();
-    <script src="app-bundle.js"></script>
-    <script src="github-auto.js"></script>
-    <script>
-    // INICIALIZAÇÃO SEGURA - garante dados antes de mostrar tela
-    (async function() {
-        ...todo o bloco de inicialização...
     })();
     </script>
 </body>
