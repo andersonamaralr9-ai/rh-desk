@@ -10,8 +10,14 @@
 </head>
 <body>
     <div id="app">
+        <!-- LOADING SCREEN -->
+        <div id="loading-screen" style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:16px;">
+            <i class="fas fa-spinner fa-spin" style="font-size:40px;color:#4f46e5;"></i>
+            <p style="color:#64748b;font-size:16px;">Carregando RH Desk...</p>
+        </div>
+
         <!-- LOGIN SCREEN -->
-        <div id="login-screen" class="screen active">
+        <div id="login-screen" class="screen">
             <div class="login-container">
                 <div class="login-logo">
                     <i class="fas fa-headset"></i>
@@ -39,7 +45,6 @@
 
         <!-- MAIN APP -->
         <div id="main-app" class="screen">
-            <!-- SIDEBAR -->
             <aside id="sidebar">
                 <div class="sidebar-header">
                     <i class="fas fa-headset"></i>
@@ -52,20 +57,14 @@
                         <span id="user-role-display" class="role-badge">Perfil</span>
                     </div>
                 </div>
-                <nav id="sidebar-nav">
-                    <!-- Menu items are dynamically generated -->
-                </nav>
+                <nav id="sidebar-nav"></nav>
                 <div class="sidebar-footer">
                     <button onclick="handleLogout()" class="btn-logout">
                         <i class="fas fa-sign-out-alt"></i> Sair
                     </button>
                 </div>
             </aside>
-
-            <!-- CONTENT -->
-            <main id="content">
-                <!-- Dynamic content loaded here -->
-            </main>
+            <main id="content"></main>
         </div>
     </div>
 
@@ -84,9 +83,59 @@
     <!-- TOAST NOTIFICATIONS -->
     <div id="toast-container"></div>
 
-      <!-- TOAST NOTIFICATIONS -->
-    <div id="toast-container"></div>
-
     <script src="app-bundle.js"></script>
+    <script>
+    // INICIALIZAÇÃO SEGURA - garante dados antes de mostrar tela
+    (async function() {
+        try {
+            // Carregar config GitHub se existir
+            var ghConfig = localStorage.getItem('rhdesk_github_config');
+            if (ghConfig) {
+                var config = JSON.parse(ghConfig);
+                if (config.token && config.owner && config.repo) {
+                    githubAPI.configure(config.token, config.owner, config.repo);
+                }
+            }
+        } catch(e) { console.error('Config GitHub erro:', e); }
+
+        // Inicializar banco
+        try {
+            await db.init();
+        } catch(e) { console.error('DB init erro:', e); }
+
+        // Garantir dados padrão SEMPRE
+        if (!db.data.users || db.data.users.length === 0) {
+            db.createDefaultData();
+            db.saveToLocal();
+        }
+        if (!db.data.catalog || !db.data.catalog.categories || db.data.catalog.categories.length === 0) {
+            db.createDefaultCatalog();
+            db.saveToLocal();
+        }
+        if (!db.data.sla || db.data.sla.length === 0) {
+            db.createDefaultSLA();
+            db.saveToLocal();
+        }
+
+        console.log('RH Desk pronto - Users:', db.data.users.length, '| Catalog:', db.data.catalog.categories.length, '| SLA:', db.data.sla.length);
+
+        // Esconder loading
+        document.getElementById('loading-screen').style.display = 'none';
+
+        // Verificar sessão ou mostrar login
+        if (checkSession()) {
+            showMainApp();
+        } else {
+            showLoginScreen();
+        }
+
+        // Auto-sync
+        setInterval(async function() {
+            if (db.useGitHub && currentUser) {
+                try { await db.syncFromGitHub(); } catch(e) {}
+            }
+        }, 5 * 60 * 1000);
+    })();
+    </script>
 </body>
 </html>
