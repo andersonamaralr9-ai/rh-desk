@@ -263,4 +263,316 @@ class Database {
         this.isSyncing = true;
 
         while (this.syncQueue.length > 0) {
-            const item = this.syncQueue.shift();<span class="cursor">█</span>
+            const item = this.syncQueue.shift();
+            try {
+                await this.syncToGitHub(item.collection);
+            } catch (e) {
+                if (!item.retries || item.retries < 3) {
+                    item.retries = (item.retries || 0) + 1;
+                    this.syncQueue.push(item);
+                }
+            }
+        }
+
+        this.isSyncing = false;
+    }
+
+    // Fazer backup completo
+    async createBackup() {
+        if (!this.useGitHub) return;
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const backup = JSON.stringify(this.data, null, 2);
+
+        try {
+            await githubAPI.saveFile(
+                `backups/backup_${timestamp}.json`,
+                backup,
+                `Backup - ${new Date().toLocaleString('pt-BR')}`
+            );
+            showToast('Backup realizado com sucesso!', 'success');
+        } catch (error) {
+            console.error('Erro no backup:', error);
+            showToast('Erro ao realizar backup', 'error');
+        }
+    }
+
+    // === CRUD USERS ===
+    getUsers() { return this.data.users.filter(u => u.active !== false); }
+    getAllUsers() { return this.data.users; }
+
+    getUserById(id) { return this.data.users.find(u => u.id === id); }
+
+    getUserByEmail(email) {
+        return this.data.users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.active !== false);
+    }
+
+    async addUser(user) {
+        const maxId = this.data.users.reduce((max, u) => {
+            const num = parseInt(u.id.replace('USR', ''));
+            return num > max ? num : max;
+        }, 0);
+        user.id = 'USR' + String(maxId + 1).padStart(3, '0');
+        user.createdAt = new Date().toISOString();
+        user.active = true;
+        this.data.users.push(user);
+        await this.syncToGitHub('users');
+        return user;
+    }
+
+    async updateUser(id, updates) {
+        const index = this.data.users.findIndex(u => u.id === id);
+        if (index >= 0) {
+            this.data.users[index] = { ...this.data.users[index], ...updates };
+            await this.syncToGitHub('users');
+            return this.data.users[index];
+        }
+        return null;
+    }
+
+    async deleteUser(id) {
+        const index = this.data.users.findIndex(u => u.id === id);
+        if (index >= 0) {
+            this.data.users[index].active = false;
+            await this.syncToGitHub('users');
+        }
+    }
+
+    // === CRUD TICKETS ===
+    getTickets(filter = {}) {
+        let tickets = [...this.data.tickets];
+
+        if (filter.userId) {
+            tickets = tickets.filter(t => t.createdBy === filter.userId);
+        }
+        if (filter.assignedTo) {
+            tickets = tickets.filter(t => t.assignedTo === filter.assignedTo);
+        }
+        if (filter.status) {
+            tickets = tickets.filter(t => t.status === filter.status);
+        }
+        if (filter.category) {
+            tickets = tickets.filter(t => t.categoryId === filter.category);
+        }
+        if (filter.search) {
+            const s = filter.search.toLowerCase();
+            tickets = tickets.filter(t =>
+                t.id.toLowerCase().includes(s) ||
+                t.subject.toLowerCase().includes(s) ||
+                t.description.toLowerCase().includes(s)
+            );
+        }
+
+        return tickets.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    }
+
+    getTicketById(id) { return this.data.tickets.find(t => t.id === id); }
+
+    async addTicket(ticket) {
+        const count = this.data.tickets.length + 1;
+        const year = new Date().getFullYear();
+        ticket.id = `CHM-${year}-${String(count).padStart(5, '0')}`;
+        ticket.createdAt = new Date().toISOString();
+        ticket.updatedAt = new Date().toISOString();
+        ticket.status = 'aberto';
+        ticket.history = [{
+            action: 'Chamado aberto',
+            by: ticket.createdBy,
+            at: ticket.createdAt,
+            details: 'Chamado criado no sistema'
+        }];
+
+        const sla = this.getSLAById(ticket.slaId);
+        if (sla) {
+            ticket.slaDeadline = this.calculateSLADeadline(ticket.createdAt, sla);
+            ticket.slaHours = sla.hours;
+            ticket.slaCountWeekends = sla.countWeekends;
+        }
+
+        this.data.tickets.push(ticket);
+        await this.syncToGitHub('tickets');
+        return ticket;
+    }
+
+    async updateTicket(id, updates) {
+        const index = this.data.tickets.findIndex(t => t.id === id);
+        if (index >= 0) {
+            updates.updatedAt = new Date().toISOString();
+            this.data.tickets[index] = { ...this.data.tickets[index], ...updates };
+            await this.syncToGitHub('tickets');
+            return this.data.tickets[index];
+        }
+        return null;
+    }
+
+    async addTicketHistory(ticketId, action, userId, details = '') {
+        const ticket = this.getTicketById(ticketId);
+        if (ticket) {
+            if (!ticket.history) ticket.history = [];
+            ticket.history.push({
+                action, by: userId, at: new Date().toISOString(), details
+            });
+            ticket.updatedAt = new Date().toISOString();
+            await this.syncToGitHub('tickets');
+        }
+    }
+
+    // === CRUD MESSAGES ===
+    getMessages(ticketId) {
+        return this.data.messages
+            .filter(m => m.ticketId === ticketId)
+            .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    }
+
+    async addMessage(message) {
+        message.id = 'MSG' + Date.now() + Math.random().toString(36).substr(2, 4);
+        message.createdAt = new Date().toISOString();
+        this.data.messages.push(message);
+        await this.syncToGitHub('messages');
+        return message;
+    }
+
+    // === CRUD CATALOG ===
+    getCategories() { return this.data.catalog.categories.filter(c => c.active !== false); }
+    getAllCategories() { return this.data.catalog.categories; }
+
+    getCategoryById(id) { return this.data.catalog.categories.find(c => c.id === id); }
+
+    getServiceById(serviceId) {
+        for (const cat of this.data.catalog.categories) {
+            const service = cat.services.find(s => s.id === serviceId);
+            if (service) return { ...service, category: cat };
+        }
+        return null;
+    }
+
+    async addCategory(category) {
+        const maxId = this.data.catalog.categories.reduce((max, c) => {
+            const num = parseInt(c.id.replace('CAT', ''));
+            return num > max ? num : max;
+        }, 0);
+        category.id = 'CAT' + String(maxId + 1).padStart(3, '0');
+        category.active = true;
+        category.services = category.services || [];
+        this.data.catalog.categories.push(category);
+        await this.syncToGitHub('catalog');
+        return category;
+    }
+
+    async updateCategory(id, updates) {
+        const index = this.data.catalog.categories.findIndex(c => c.id === id);
+        if (index >= 0) {
+            this.data.catalog.categories[index] = { ...this.data.catalog.categories[index], ...updates };
+            await this.syncToGitHub('catalog');
+            return this.data.catalog.categories[index];
+        }
+        return null;
+    }
+
+    async addService(categoryId, service) {
+        const category = this.getCategoryById(categoryId);
+        if (category) {
+            service.id = 'SRV' + Date.now().toString().slice(-6);
+            service.active = true;
+            category.services.push(service);
+            await this.syncToGitHub('catalog');
+            return service;
+        }
+        return null;
+    }
+
+    async updateService(categoryId, serviceId, updates) {
+        const category = this.getCategoryById(categoryId);
+        if (category) {
+            const index = category.services.findIndex(s => s.id === serviceId);
+            if (index >= 0) {
+                category.services[index] = { ...category.services[index], ...updates };
+                await this.syncToGitHub('catalog');
+                return category.services[index];
+            }
+        }
+        return null;
+    }
+
+    // === CRUD SLA ===
+    getSLAs() { return this.data.sla.filter(s => s.active !== false); }
+    getSLAById(id) { return this.data.sla.find(s => s.id === id); }
+
+    async addSLA(sla) {
+        const maxId = this.data.sla.reduce((max, s) => {
+            const num = parseInt(s.id.replace('SLA', ''));
+            return num > max ? num : max;
+        }, 0);
+        sla.id = 'SLA' + String(maxId + 1).padStart(3, '0');
+        sla.active = true;
+        this.data.sla.push(sla);
+        await this.syncToGitHub('sla');
+        return sla;
+    }
+
+    async updateSLA(id, updates) {
+        const index = this.data.sla.findIndex(s => s.id === id);
+        if (index >= 0) {
+            this.data.sla[index] = { ...this.data.sla[index], ...updates };
+            await this.syncToGitHub('sla');
+            return this.data.sla[index];
+        }
+        return null;
+    }
+
+    // === SLA CALCULATION ===
+    calculateSLADeadline(startDate, sla) {
+        let deadline = new Date(startDate);
+        let hoursRemaining = sla.hours;
+
+        while (hoursRemaining > 0) {
+            deadline.setHours(deadline.getHours() + 1);
+
+            if (!sla.countWeekends) {
+                const day = deadline.getDay();
+                if (day === 0 || day === 6) continue;
+            }
+
+            hoursRemaining--;
+        }
+
+        return deadline.toISOString();
+    }
+
+    getSLAStatus(ticket) {
+        if (!ticket.slaDeadline) return { percent: 0, status: 'none', text: 'SLA não definido' };
+        if (ticket.status === 'fechado' || ticket.status === 'cancelado') {
+            return { percent: 100, status: 'completed', text: 'Chamado encerrado' };
+        }
+
+        const now = new Date();
+        const created = new Date(ticket.createdAt);
+        const deadline = new Date(ticket.slaDeadline);
+        const total = deadline - created;
+        const elapsed = now - created;
+        const percent = Math.min(100, Math.round((elapsed / total) * 100));
+
+        let status = 'ok';
+        let text = '';
+
+        if (now > deadline) {
+            status = 'danger';
+            const overdue = Math.round((now - deadline) / (1000 * 60 * 60));
+            text = `SLA estourado há ${overdue}h`;
+        } else {
+            const remaining = Math.round((deadline - now) / (1000 * 60 * 60));
+            if (percent >= 75) {
+                status = 'warning';
+                text = `${remaining}h restantes (atenção!)`;
+            } else {
+                status = 'ok';
+                text = `${remaining}h restantes`;
+            }
+        }
+
+        return { percent, status, text };
+    }
+}
+
+// Instância global
+const db = new Database();
