@@ -88,7 +88,7 @@
     <!-- SCRIPTS NA ORDEM CORRETA -->
     <script src="app-bundle.js"></script>
     <script src="github-auto.js"></script>
-    <script>
+        <script>
     function toggleSidebar() {
         document.getElementById('sidebar').classList.toggle('open');
         var ov = document.getElementById('sidebar-overlay');
@@ -103,23 +103,40 @@
     });
 
     (async function() {
+        console.log('=== INICIO ===');
+
+        // 1. Tentar buscar dados da nuvem (publico, sem token)
+        var cloudLoaded = false;
         try {
-            // 1. Tentar sync da nuvem ANTES de tudo
-            var synced = await cloudSyncOnLoad();
-            if (synced) {
-                console.log('Dados carregados da nuvem');
+            console.log('Buscando dados da nuvem...');
+            var owner = RHDESK_CLOUD.owner;
+            var repo = RHDESK_CLOUD.repo;
+            if (owner) {
+                var cloudData = await fetchPublicData(owner, repo);
+                if (cloudData.users && cloudData.users.length > 0) {
+                    db.data.users = cloudData.users;
+                    cloudLoaded = true;
+                    console.log('NUVEM: ' + cloudData.users.length + ' usuarios carregados');
+                }
+                if (cloudData.tickets) db.data.tickets = cloudData.tickets;
+                if (cloudData.catalog && cloudData.catalog.categories) db.data.catalog = cloudData.catalog;
+                if (cloudData.sla && cloudData.sla.length > 0) db.data.sla = cloudData.sla;
+                if (cloudData.messages) db.data.messages = cloudData.messages;
+                db.saveToLocal();
             }
         } catch(e) {
             console.warn('Cloud sync erro:', e);
         }
 
-        // 2. Inicializar DB (cria defaults se nuvem nao retornou nada)
-        try {
-            await db.init();
-        } catch(e) { console.error('DB init erro:', e); }
+        // 2. Se nuvem nao carregou, tentar localStorage
+        if (!cloudLoaded) {
+            console.log('Nuvem nao disponivel, tentando localStorage...');
+            db.loadFromLocal();
+        }
 
-        // 3. Garantir dados padrao
+        // 3. Se tambem nao tem localStorage, criar dados padrao
         if (!db.data.users || db.data.users.length === 0) {
+            console.log('Criando dados padrao...');
             db.createDefaultData();
             db.saveToLocal();
         }
@@ -132,7 +149,20 @@
             db.saveToLocal();
         }
 
-        console.log('RH Desk pronto - Users:', db.data.users.length);
+        // 4. Configurar GitHub autenticado se tiver token salvo
+        try {
+            var ghConfig = localStorage.getItem('rhdesk_github_config');
+            if (ghConfig) {
+                var config = JSON.parse(ghConfig);
+                if (config.token && config.owner && config.repo) {
+                    githubAPI.configure(config.token, config.owner, config.repo);
+                    db.useGitHub = true;
+                    console.log('GitHub autenticado configurado');
+                }
+            }
+        } catch(e) {}
+
+        console.log('FINAL - Users:', db.data.users.length, db.data.users.map(function(u){return u.email;}));
         document.getElementById('loading-screen').style.display = 'none';
 
         if (checkSession()) {
@@ -143,12 +173,21 @@
 
         // Auto-sync a cada 3 minutos
         setInterval(async function() {
-            if (db.useGitHub && currentUser) {
-                try { await db.syncFromGitHub(); } catch(e) {}
-            } else {
-                // Mesmo sem token, tenta sync publico para pegar atualizacoes
-                try { await cloudSyncOnLoad(); } catch(e) {}
-            }
+            try {
+                if (db.useGitHub && currentUser) {
+                    await db.syncFromGitHub();
+                } else if (RHDESK_CLOUD.owner) {
+                    var data = await fetchPublicData(RHDESK_CLOUD.owner, RHDESK_CLOUD.repo);
+                    if (data.users && data.users.length > 0) {
+                        db.data.users = data.users;
+                        if (data.tickets) db.data.tickets = data.tickets;
+                        if (data.catalog) db.data.catalog = data.catalog;
+                        if (data.sla) db.data.sla = data.sla;
+                        if (data.messages) db.data.messages = data.messages;
+                        db.saveToLocal();
+                    }
+                }
+            } catch(e) {}
         }, 3 * 60 * 1000);
     })();
     </script>
