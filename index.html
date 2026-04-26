@@ -90,31 +90,35 @@
     <script src="github-auto.js"></script>
     <script>
     function toggleSidebar() {
-    document.getElementById('sidebar').classList.toggle('open');
-    document.getElementById('sidebar-overlay').classList.toggle('active');
-}
-// Fechar sidebar ao clicar num item do menu (mobile)
-document.addEventListener('click', function(e) {
-    if (e.target.closest('#sidebar-nav .nav-item') && window.innerWidth <= 768) {
-        document.getElementById('sidebar').classList.remove('open');
-        document.getElementById('sidebar-overlay').classList.remove('active');
+        document.getElementById('sidebar').classList.toggle('open');
+        var ov = document.getElementById('sidebar-overlay');
+        if (ov) ov.classList.toggle('active');
     }
-});
-        (async function() {
-        try {
-            var ghConfig = localStorage.getItem('rhdesk_github_config');
-            if (ghConfig) {
-                var config = JSON.parse(ghConfig);
-                if (config.token && config.owner && config.repo) {
-                    githubAPI.configure(config.token, config.owner, config.repo);
-                }
-            }
-        } catch(e) { console.error('Config GitHub erro:', e); }
+    document.addEventListener('click', function(e) {
+        if (e.target.closest('#sidebar-nav .nav-item') && window.innerWidth <= 768) {
+            document.getElementById('sidebar').classList.remove('open');
+            var ov = document.getElementById('sidebar-overlay');
+            if (ov) ov.classList.remove('active');
+        }
+    });
 
+    (async function() {
+        try {
+            // 1. Tentar sync da nuvem ANTES de tudo
+            var synced = await cloudSyncOnLoad();
+            if (synced) {
+                console.log('Dados carregados da nuvem');
+            }
+        } catch(e) {
+            console.warn('Cloud sync erro:', e);
+        }
+
+        // 2. Inicializar DB (cria defaults se nuvem nao retornou nada)
         try {
             await db.init();
         } catch(e) { console.error('DB init erro:', e); }
 
+        // 3. Garantir dados padrao
         if (!db.data.users || db.data.users.length === 0) {
             db.createDefaultData();
             db.saveToLocal();
@@ -129,7 +133,6 @@ document.addEventListener('click', function(e) {
         }
 
         console.log('RH Desk pronto - Users:', db.data.users.length);
-
         document.getElementById('loading-screen').style.display = 'none';
 
         if (checkSession()) {
@@ -138,11 +141,15 @@ document.addEventListener('click', function(e) {
             showLoginScreen();
         }
 
+        // Auto-sync a cada 3 minutos
         setInterval(async function() {
             if (db.useGitHub && currentUser) {
                 try { await db.syncFromGitHub(); } catch(e) {}
+            } else {
+                // Mesmo sem token, tenta sync publico para pegar atualizacoes
+                try { await cloudSyncOnLoad(); } catch(e) {}
             }
-        }, 5 * 60 * 1000);
+        }, 3 * 60 * 1000);
     })();
     </script>
 </body>
