@@ -89,7 +89,18 @@
     <script src="app-bundle.js"></script>
     <script src="github-auto.js"></script>
     <script>
-    (async function() {
+    function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('sidebar-overlay').classList.toggle('active');
+}
+// Fechar sidebar ao clicar num item do menu (mobile)
+document.addEventListener('click', function(e) {
+    if (e.target.closest('#sidebar-nav .nav-item') && window.innerWidth <= 768) {
+        document.getElementById('sidebar').classList.remove('open');
+        document.getElementById('sidebar-overlay').classList.remove('active');
+    }
+});
+        (async function() {
         try {
             var ghConfig = localStorage.getItem('rhdesk_github_config');
             if (ghConfig) {
