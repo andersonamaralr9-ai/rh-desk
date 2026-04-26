@@ -114,6 +114,9 @@ async function cloudSyncOnLoad() {
         } catch(e) {}
     }
     
+        if (!owner && RHDESK_CLOUD.owner) {
+        owner = RHDESK_CLOUD.owner;
+    }
     if (!owner) {
         console.log('Nenhuma config de nuvem encontrada - usando dados locais');
         return false;
