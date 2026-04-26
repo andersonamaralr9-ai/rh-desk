@@ -6,7 +6,7 @@
 
 // === CONFIG GLOBAL - sera preenchido pelo admin ===
 var RHDESK_CLOUD = {
-    owner: '',
+    owner: 'andersonamaralr9-ai',
     repo: 'rh-desk-data'
 };
 
