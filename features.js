@@ -305,9 +305,9 @@ function renderReports(container) {
         '<select id="rpt-sla" onchange="applyReportFilters()"><option value="">Todos</option>' +
         '<option value="dentro">Dentro do prazo</option><option value="fora">Fora do prazo</option></select></div>' +
         '<div class="form-group" style="margin:0"><label style="font-size:12px">Data inicio</label>' +
-        '<input type="date" id="rpt-date-from" onchange="applyReportFilters()"></div>' +
-        '<div class="form-group" style="margin:0"><label style="font-size:12px">Data fim</label>' +
-        '<input type="date" id="rpt-date-to" onchange="applyReportFilters()"></div>' +
+'<input type="text" id="rpt-date-from" placeholder="dd/mm/aaaa" maxlength="10" oninput="maskDate(this)" onchange="applyReportFilters()"></div>' +
+'<div class="form-group" style="margin:0"><label style="font-size:12px">Data fim</label>' +
+'<input type="text" id="rpt-date-to" placeholder="dd/mm/aaaa" maxlength="10" oninput="maskDate(this)" onchange="applyReportFilters()"></div>' +
         '</div></div></div>' +
         
         // Cards de resumo
@@ -871,6 +871,22 @@ function doReopen(ticketId) {
     if (!reason) { showToast('Informe o motivo', 'warning'); return; }
     closeModal();
     reopenTicket(ticketId, reason);
+}
+// Máscara dd/mm/aaaa
+function maskDate(input) {
+    var v = input.value.replace(/\D/g, '');
+    if (v.length > 2) v = v.substring(0, 2) + '/' + v.substring(2);
+    if (v.length > 5) v = v.substring(0, 5) + '/' + v.substring(5, 9);
+    input.value = v;
+    if (v.length === 10) applyReportFilters();
+}
+
+// Converter dd/mm/aaaa para aaaa-mm-dd (ISO)
+function parseBRDate(str) {
+    if (!str || str.length !== 10) return '';
+    var parts = str.split('/');
+    if (parts.length !== 3) return '';
+    return parts[2] + '-' + parts[1] + '-' + parts[0];
 }
 
 console.log('features.js carregado');
