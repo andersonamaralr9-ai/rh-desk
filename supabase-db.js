@@ -1,13 +1,12 @@
 // ============================================
-// SUPABASE DATABASE - Substitui GitHub como backend
+// SUPABASE DATABASE LAYER
+// Substitui GitHub como backend. Sem token!
 // ============================================
 
 var SUPABASE_URL = 'https://fnihosrvwitlnnlcarpf.supabase.co';
-var SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZuaWhvc3J2d2l0bG5ubGNhcnBmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU2OTI4MDAsImV4cCI6MjA2MTI2ODgwMH0';
+var SUPABASE_KEY = 'sb_publishable_BackMGGYNFGhIv4lqydCnQ_8izBUueF';
 
-// Verificar se a key informada é a publishable ou se precisa usar a anon key real
-// A publishable key que você me passou parece ser um prefixo. Vamos usar a API REST diretamente.
-
+// === REST helper ===
 var supaRest = {
     headers: function() {
         return {
@@ -17,406 +16,613 @@ var supaRest = {
             'Prefer': 'return=representation'
         };
     },
-    url: function(table, query) {
-        return SUPABASE_URL + '/rest/v1/' + table + (query || '');
-    },
 
-    // SELECT
-    async select(table, query) {
-        var resp = await fetch(this.url(table, query || '?select=*'), {
-            headers: this.headers()
-        });
-        if (!resp.ok) throw new Error('Supabase select error: ' + resp.status);
+    select: async function(table, query) {
+        var url = SUPABASE_URL + '/rest/v1/' + table;
+        if (query) url += '?' + query;
+        var resp = await fetch(url, { headers: this.headers() });
+        if (!resp.ok) {
+            var err = await resp.text();
+            throw new Error('Supabase SELECT ' + table + ': ' + resp.status + ' ' + err);
+        }
         return await resp.json();
     },
 
-    // INSERT
-    async insert(table, data) {
-        var resp = await fetch(this.url(table), {
+    insert: async function(table, data) {
+        var resp = await fetch(SUPABASE_URL + '/rest/v1/' + table, {
             method: 'POST',
             headers: this.headers(),
             body: JSON.stringify(data)
         });
         if (!resp.ok) {
             var err = await resp.text();
-            throw new Error('Supabase insert error: ' + resp.status + ' ' + err);
+            throw new Error('Supabase INSERT ' + table + ': ' + resp.status + ' ' + err);
         }
         return await resp.json();
     },
 
-    // UPDATE
-    async update(table, match, data) {
-        var resp = await fetch(this.url(table, '?' + match), {
+    update: async function(table, matchQuery, data) {
+        var resp = await fetch(SUPABASE_URL + '/rest/v1/' + table + '?' + matchQuery, {
             method: 'PATCH',
             headers: this.headers(),
             body: JSON.stringify(data)
         });
-        if (!resp.ok) throw new Error('Supabase update error: ' + resp.status);
+        if (!resp.ok) {
+            var err = await resp.text();
+            throw new Error('Supabase UPDATE ' + table + ': ' + resp.status + ' ' + err);
+        }
         return await resp.json();
     },
 
-    // DELETE
-    async remove(table, match) {
-        var resp = await fetch(this.url(table, '?' + match), {
+    remove: async function(table, matchQuery) {
+        var resp = await fetch(SUPABASE_URL + '/rest/v1/' + table + '?' + matchQuery, {
             method: 'DELETE',
             headers: this.headers()
         });
-        if (!resp.ok) throw new Error('Supabase delete error: ' + resp.status);
+        if (!resp.ok) {
+            var err = await resp.text();
+            throw new Error('Supabase DELETE ' + table + ': ' + resp.status + ' ' + err);
+        }
         return true;
+    },
+
+    upsert: async function(table, data, onConflict) {
+        var h = this.headers();
+        h['Prefer'] = 'return=representation,resolution=merge-duplicates';
+        var url = SUPABASE_URL + '/rest/v1/' + table;
+        if (onConflict) url += '?on_conflict=' + onConflict;
+        var resp = await fetch(url, {
+            method: 'POST',
+            headers: h,
+            body: JSON.stringify(data)
+        });
+        if (!resp.ok) {
+            var err = await resp.text();
+            throw new Error('Supabase UPSERT ' + table + ': ' + resp.status + ' ' + err);
+        }
+        return await resp.json();
     }
 };
 
-// ============================================
-// OVERRIDE DATABASE CLASS - Usar Supabase
-// ============================================
-
-// Carregar dados do Supabase
-db.loadFromSupabase = async function() {
+// === Carregar TUDO do Supabase para db.data ===
+async function loadFromSupabase() {
+    console.log('Carregando dados do Supabase...');
     try {
-        // Carregar users
-        var users = await supaRest.select('users', '?select=*&order=created_at.asc');
+        // Users
+        var users = await supaRest.select('users', 'select=*&order=created_at.asc');
         if (users && users.length > 0) {
-            this.data.users = users.map(function(u) {
-                return {
-                    id: u.id, name: u.name, email: u.email, password: u.password,
-                    role: u.role, active: u.active, createdAt: u.created_at
-                };
-            });
+            db.data.users = users;
+            console.log('Supabase users:', users.length);
         }
 
-        // Carregar tickets
-        var tickets = await supaRest.select('tickets', '?select=*&order=created_at.desc');
+        // Tickets
+        var tickets = await supaRest.select('tickets', 'select=*&order=created_at.desc');
         if (tickets) {
-            this.data.tickets = tickets.map(function(t) {
+            // Parse campos JSON se necessario
+            db.data.tickets = tickets.map(function(t) {
+                if (typeof t.history === 'string') try { t.history = JSON.parse(t.history); } catch(e) { t.history = []; }
+                if (typeof t.form_data === 'string') try { t.form_data = JSON.parse(t.form_data); } catch(e) { t.form_data = {}; }
+                if (!t.history) t.history = [];
+                if (!t.form_data) t.form_data = {};
+                // Mapear snake_case para camelCase que o app usa
                 return {
-                    id: t.id, subject: t.subject, description: t.description,
-                    priority: t.priority, status: t.status,
-                    categoryId: t.category_id, serviceId: t.service_id,
-                    serviceName: t.service_name, createdBy: t.created_by,
-                    assignedTo: t.assigned_to, slaId: t.sla_id,
-                    slaDeadline: t.sla_deadline, slaHours: t.sla_hours,
-                    slaCountWeekends: t.sla_count_weekends,
-                    formData: t.form_data, attachments: t.attachments,
-                    history: t.history, createdAt: t.created_at, updatedAt: t.updated_at
+                    id: t.id,
+                    userId: t.user_id,
+                    categoryId: t.category_id,
+                    serviceId: t.service_id,
+                    title: t.title,
+                    description: t.description,
+                    priority: t.priority,
+                    status: t.status,
+                    assignedTo: t.assigned_to,
+                    slaId: t.sla_id,
+                    createdAt: t.created_at,
+                    updatedAt: t.updated_at,
+                    closedAt: t.closed_at,
+                    formData: t.form_data,
+                    history: t.history,
+                    attachments: t.attachments || []
                 };
             });
+            console.log('Supabase tickets:', db.data.tickets.length);
         }
 
-        // Carregar messages
-        var messages = await supaRest.select('messages', '?select=*&order=created_at.asc');
+        // Messages
+        var messages = await supaRest.select('messages', 'select=*&order=created_at.asc');
         if (messages) {
-            this.data.messages = messages.map(function(m) {
+            db.data.messages = messages.map(function(m) {
                 return {
-                    id: m.id, ticketId: m.ticket_id, userId: m.user_id,
-                    type: m.type, text: m.text, attachment: m.attachment,
+                    id: m.id,
+                    ticketId: m.ticket_id,
+                    userId: m.user_id,
+                    text: m.text,
+                    type: m.type,
+                    attachments: m.attachments || [],
                     createdAt: m.created_at
                 };
             });
+            console.log('Supabase messages:', db.data.messages.length);
         }
 
-        // Carregar catalog
-        var catalog = await supaRest.select('catalog', '?select=data&limit=1');
+        // Catalog (armazenado como JSON numa unica linha)
+        var catalog = await supaRest.select('catalog', 'select=*');
         if (catalog && catalog.length > 0 && catalog[0].data) {
-            this.data.catalog = catalog[0].data;
+            db.data.catalog = catalog[0].data;
+            console.log('Supabase catalog categories:', db.data.catalog.categories ? db.data.catalog.categories.length : 0);
         }
 
-        // Carregar SLA
-        var slas = await supaRest.select('sla', '?select=*');
-        if (slas && slas.length > 0) {
-            this.data.sla = slas.map(function(s) {
+        // SLA
+        var sla = await supaRest.select('sla', 'select=*&order=hours.asc');
+        if (sla && sla.length > 0) {
+            db.data.sla = sla.map(function(s) {
                 return {
-                    id: s.id, name: s.name, hours: s.hours,
-                    countWeekends: s.count_weekends, active: s.active
+                    id: s.id,
+                    name: s.name,
+                    hours: s.hours,
+                    countWeekends: s.count_weekends,
+                    active: s.active
                 };
             });
+            console.log('Supabase sla:', db.data.sla.length);
         }
 
-        this.saveToLocal();
-        console.log('Supabase sync OK - Users:', this.data.users.length);
+        db.saveToLocal();
         return true;
     } catch(e) {
-        console.error('Supabase load error:', e);
+        console.error('Erro ao carregar do Supabase:', e);
         return false;
+    }
+}
+
+// === Sobrescrever db.addUser ===
+var _origAddUser = db.addUser.bind(db);
+db.addUser = async function(userData) {
+    // Gerar ID
+    var maxNum = 0;
+    db.data.users.forEach(function(u) {
+        var num = parseInt(u.id.replace('USR', ''));
+        if (num > maxNum) maxNum = num;
+    });
+    var newId = 'USR' + String(maxNum + 1).padStart(3, '0');
+
+    var newUser = {
+        id: newId,
+        name: userData.name,
+        email: userData.email,
+        password: userData.password,
+        role: userData.role || 'user',
+        active: true,
+        created_at: new Date().toISOString()
+    };
+
+    try {
+        var result = await supaRest.insert('users', newUser);
+        // Adicionar ao db.data com formato local
+        var localUser = Object.assign({}, newUser);
+        localUser.createdAt = newUser.created_at;
+        db.data.users.push(localUser);
+        db.saveToLocal();
+        console.log('Usuario criado no Supabase:', newId);
+        return localUser;
+    } catch(e) {
+        console.error('Erro Supabase addUser:', e);
+        // Fallback local
+        var localUser = {
+            id: newId,
+            name: userData.name,
+            email: userData.email,
+            password: userData.password,
+            role: userData.role || 'user',
+            active: true,
+            createdAt: new Date().toISOString()
+        };
+        db.data.users.push(localUser);
+        db.saveToLocal();
+        return localUser;
     }
 };
 
-// Override addUser
-var _origAddUser = db.addUser.bind(db);
-db.addUser = async function(user) {
-    var maxId = this.data.users.reduce(function(max, u) {
-        var n = parseInt(u.id.replace('USR', '')); return n > max ? n : max;
-    }, 0);
-    user.id = 'USR' + String(maxId + 1).padStart(3, '0');
-    user.createdAt = new Date().toISOString();
-    user.active = true;
-    this.data.users.push(user);
-    this.saveToLocal();
+// === Sobrescrever db.updateUser ===
+var _origUpdateUser = db.updateUser ? db.updateUser.bind(db) : null;
+db.updateUser = async function(userId, updates) {
+    // Atualizar no Supabase
+    var supaUpdates = {};
+    if (updates.name !== undefined) supaUpdates.name = updates.name;
+    if (updates.email !== undefined) supaUpdates.email = updates.email;
+    if (updates.password !== undefined) supaUpdates.password = updates.password;
+    if (updates.role !== undefined) supaUpdates.role = updates.role;
+    if (updates.active !== undefined) supaUpdates.active = updates.active;
 
     try {
-        await supaRest.insert('users', {
-            id: user.id, name: user.name, email: user.email,
-            password: user.password, role: user.role, active: user.active,
-            created_at: user.createdAt
-        });
-    } catch(e) { console.error('Supabase addUser error:', e); }
+        await supaRest.update('users', 'id=eq.' + userId, supaUpdates);
+    } catch(e) {
+        console.error('Erro Supabase updateUser:', e);
+    }
+
+    // Atualizar local
+    var user = db.data.users.find(function(u) { return u.id === userId; });
+    if (user) {
+        Object.assign(user, updates);
+        db.saveToLocal();
+    }
     return user;
 };
 
-// Override updateUser
-db.updateUser = async function(id, updates) {
-    var idx = this.data.users.findIndex(function(u) { return u.id === id; });
-    if (idx >= 0) {
-        Object.assign(this.data.users[idx], updates);
-        this.saveToLocal();
-        try {
-            var dbUpdates = {};
-            if (updates.name) dbUpdates.name = updates.name;
-            if (updates.email) dbUpdates.email = updates.email;
-            if (updates.password) dbUpdates.password = updates.password;
-            if (updates.role) dbUpdates.role = updates.role;
-            if (updates.active !== undefined) dbUpdates.active = updates.active;
-            await supaRest.update('users', 'id=eq.' + id, dbUpdates);
-        } catch(e) { console.error('Supabase updateUser error:', e); }
-        return this.data.users[idx];
+// === Sobrescrever db.deleteUser ===
+db.deleteUser = async function(userId) {
+    try {
+        await supaRest.remove('users', 'id=eq.' + userId);
+    } catch(e) {
+        console.error('Erro Supabase deleteUser:', e);
     }
-    return null;
+    db.data.users = db.data.users.filter(function(u) { return u.id !== userId; });
+    db.saveToLocal();
 };
 
-// Override deleteUser
-db.deleteUser = async function(id) {
-    var idx = this.data.users.findIndex(function(u) { return u.id === id; });
-    if (idx >= 0) {
-        this.data.users[idx].active = false;
-        this.saveToLocal();
-        try {
-            await supaRest.update('users', 'id=eq.' + id, { active: false });
-        } catch(e) { console.error('Supabase deleteUser error:', e); }
-    }
-};
-
-// Override addTicket
-db.addTicket = async function(ticket) {
-    var count = this.data.tickets.length + 1;
+// === Sobrescrever db.addTicket ===
+var _origAddTicket = db.addTicket ? db.addTicket.bind(db) : null;
+db.addTicket = async function(ticketData) {
     var year = new Date().getFullYear();
-    ticket.id = 'CHM-' + year + '-' + String(count).padStart(5, '0');
-    ticket.createdAt = new Date().toISOString();
-    ticket.updatedAt = new Date().toISOString();
-    ticket.status = 'aberto';
-    ticket.history = [{ action: 'Chamado aberto', by: ticket.createdBy, at: ticket.createdAt, details: 'Chamado criado' }];
-    var sla = this.getSLAById(ticket.slaId);
-    if (sla) {
-        ticket.slaDeadline = this.calculateSLADeadline(ticket.createdAt, sla);
-        ticket.slaHours = sla.hours;
-        ticket.slaCountWeekends = sla.countWeekends;
-    }
-    this.data.tickets.push(ticket);
-    this.saveToLocal();
+    var maxNum = 0;
+    db.data.tickets.forEach(function(t) {
+        var parts = t.id.split('-');
+        if (parts.length === 3) {
+            var num = parseInt(parts[2]);
+            if (num > maxNum) maxNum = num;
+        }
+    });
+    var newId = 'CHM-' + year + '-' + String(maxNum + 1).padStart(5, '0');
+
+    var now = new Date().toISOString();
+    var historyEntry = [{
+        date: now,
+        action: 'Chamado aberto',
+        userId: ticketData.userId,
+        details: 'Chamado criado'
+    }];
+
+    var supaTicket = {
+        id: newId,
+        user_id: ticketData.userId,
+        category_id: ticketData.categoryId,
+        service_id: ticketData.serviceId,
+        title: ticketData.title,
+        description: ticketData.description,
+        priority: ticketData.priority || 'media',
+        status: 'aberto',
+        assigned_to: ticketData.assignedTo || null,
+        sla_id: ticketData.slaId || 'SLA001',
+        created_at: now,
+        updated_at: now,
+        closed_at: null,
+        form_data: ticketData.formData || {},
+        history: historyEntry,
+        attachments: ticketData.attachments || []
+    };
 
     try {
-        await supaRest.insert('tickets', {
-            id: ticket.id, subject: ticket.subject, description: ticket.description,
-            priority: ticket.priority, status: ticket.status,
-            category_id: ticket.categoryId, service_id: ticket.serviceId,
-            service_name: ticket.serviceName, created_by: ticket.createdBy,
-            assigned_to: ticket.assignedTo, sla_id: ticket.slaId,
-            sla_deadline: ticket.slaDeadline, sla_hours: ticket.slaHours,
-            sla_count_weekends: ticket.slaCountWeekends,
-            form_data: ticket.formData, attachments: ticket.attachments,
-            history: ticket.history, created_at: ticket.createdAt, updated_at: ticket.updatedAt
-        });
-    } catch(e) { console.error('Supabase addTicket error:', e); }
+        await supaRest.insert('tickets', supaTicket);
+    } catch(e) {
+        console.error('Erro Supabase addTicket:', e);
+    }
+
+    var localTicket = {
+        id: newId,
+        userId: ticketData.userId,
+        categoryId: ticketData.categoryId,
+        serviceId: ticketData.serviceId,
+        title: ticketData.title,
+        description: ticketData.description,
+        priority: ticketData.priority || 'media',
+        status: 'aberto',
+        assignedTo: ticketData.assignedTo || null,
+        slaId: ticketData.slaId || 'SLA001',
+        createdAt: now,
+        updatedAt: now,
+        closedAt: null,
+        formData: ticketData.formData || {},
+        history: historyEntry,
+        attachments: ticketData.attachments || []
+    };
+
+    db.data.tickets.push(localTicket);
+    db.saveToLocal();
+    console.log('Ticket criado:', newId);
+    return localTicket;
+};
+
+// === Sobrescrever db.updateTicket ===
+db.updateTicket = async function(ticketId, updates) {
+    var ticket = db.data.tickets.find(function(t) { return t.id === ticketId; });
+    if (!ticket) return null;
+
+    // Aplicar updates localmente
+    Object.assign(ticket, updates);
+    ticket.updatedAt = new Date().toISOString();
+
+    // Preparar updates para Supabase (snake_case)
+    var supaUpdates = { updated_at: ticket.updatedAt };
+    if (updates.status !== undefined) supaUpdates.status = updates.status;
+    if (updates.priority !== undefined) supaUpdates.priority = updates.priority;
+    if (updates.assignedTo !== undefined) supaUpdates.assigned_to = updates.assignedTo;
+    if (updates.closedAt !== undefined) supaUpdates.closed_at = updates.closedAt;
+    if (updates.history !== undefined) supaUpdates.history = updates.history;
+    if (updates.description !== undefined) supaUpdates.description = updates.description;
+
+    try {
+        await supaRest.update('tickets', 'id=eq.' + ticketId, supaUpdates);
+    } catch(e) {
+        console.error('Erro Supabase updateTicket:', e);
+    }
+
+    db.saveToLocal();
     return ticket;
 };
 
-// Override updateTicket
-db.updateTicket = async function(id, updates) {
-    var idx = this.data.tickets.findIndex(function(t) { return t.id === id; });
-    if (idx >= 0) {
-        updates.updatedAt = new Date().toISOString();
-        Object.assign(this.data.tickets[idx], updates);
-        this.saveToLocal();
-        try {
-            var dbUp = { updated_at: updates.updatedAt };
-            if (updates.status) dbUp.status = updates.status;
-            if (updates.assignedTo !== undefined) dbUp.assigned_to = updates.assignedTo;
-            if (updates.priority) dbUp.priority = updates.priority;
-            if (updates.history) dbUp.history = updates.history;
-            if (updates.attachments) dbUp.attachments = updates.attachments;
-            await supaRest.update('tickets', 'id=eq.' + id, dbUp);
-        } catch(e) { console.error('Supabase updateTicket error:', e); }
-        return this.data.tickets[idx];
-    }
-    return null;
-};
-
-// Override addTicketHistory
+// === Adicionar historico ao ticket ===
 db.addTicketHistory = async function(ticketId, action, userId, details) {
-    var ticket = this.getTicketById(ticketId);
-    if (ticket) {
-        if (!ticket.history) ticket.history = [];
-        ticket.history.push({ action: action, by: userId, at: new Date().toISOString(), details: details || '' });
-        ticket.updatedAt = new Date().toISOString();
-        this.saveToLocal();
-        try {
-            await supaRest.update('tickets', 'id=eq.' + ticketId, {
-                history: ticket.history, updated_at: ticket.updatedAt
-            });
-        } catch(e) { console.error('Supabase addHistory error:', e); }
-    }
-};
+    var ticket = db.data.tickets.find(function(t) { return t.id === ticketId; });
+    if (!ticket) return;
 
-// Override addMessage
-db.addMessage = async function(message) {
-    message.id = 'MSG' + Date.now() + Math.random().toString(36).substr(2, 4);
-    message.createdAt = new Date().toISOString();
-    this.data.messages.push(message);
-    this.saveToLocal();
+    if (!ticket.history) ticket.history = [];
+    var entry = {
+        date: new Date().toISOString(),
+        action: action,
+        userId: userId,
+        details: details || ''
+    };
+    ticket.history.push(entry);
+    ticket.updatedAt = new Date().toISOString();
 
     try {
-        await supaRest.insert('messages', {
-            id: message.id, ticket_id: message.ticketId, user_id: message.userId,
-            type: message.type, text: message.text,
-            attachment: message.attachment || null, created_at: message.createdAt
+        await supaRest.update('tickets', 'id=eq.' + ticketId, {
+            history: ticket.history,
+            updated_at: ticket.updatedAt
         });
-    } catch(e) { console.error('Supabase addMessage error:', e); }
-    return message;
-};
-
-// Override catalog operations
-db.addCategory = async function(category) {
-    var maxId = this.data.catalog.categories.reduce(function(max, c) {
-        var n = parseInt(c.id.replace('CAT', '')); return n > max ? n : max;
-    }, 0);
-    category.id = 'CAT' + String(maxId + 1).padStart(3, '0');
-    category.active = true;
-    category.services = category.services || [];
-    this.data.catalog.categories.push(category);
-    this.saveToLocal();
-    await this._saveCatalogToSupabase();
-    return category;
-};
-
-db.updateCategory = async function(id, updates) {
-    var idx = this.data.catalog.categories.findIndex(function(c) { return c.id === id; });
-    if (idx >= 0) {
-        Object.assign(this.data.catalog.categories[idx], updates);
-        this.saveToLocal();
-        await this._saveCatalogToSupabase();
-        return this.data.catalog.categories[idx];
+    } catch(e) {
+        console.error('Erro Supabase addTicketHistory:', e);
     }
-    return null;
+
+    db.saveToLocal();
 };
 
-db.addService = async function(categoryId, service) {
-    var cat = this.getCategoryById(categoryId);
-    if (cat) {
-        service.id = 'SRV' + Date.now().toString().slice(-6);
-        service.active = true;
-        cat.services.push(service);
-        this.saveToLocal();
-        await this._saveCatalogToSupabase();
-        return service;
-    }
-    return null;
-};
+// === Sobrescrever db.addMessage ===
+db.addMessage = async function(messageData) {
+    var maxNum = 0;
+    db.data.messages.forEach(function(m) {
+        var num = parseInt(m.id.replace('MSG', ''));
+        if (num > maxNum) maxNum = num;
+    });
+    var newId = 'MSG' + String(maxNum + 1).padStart(5, '0');
+    var now = new Date().toISOString();
 
-db.updateService = async function(categoryId, serviceId, updates) {
-    var cat = this.getCategoryById(categoryId);
-    if (cat) {
-        var idx = cat.services.findIndex(function(s) { return s.id === serviceId; });
-        if (idx >= 0) {
-            Object.assign(cat.services[idx], updates);
-            this.saveToLocal();
-            await this._saveCatalogToSupabase();
-            return cat.services[idx];
-        }
-    }
-    return null;
-};
+    var supaMsg = {
+        id: newId,
+        ticket_id: messageData.ticketId,
+        user_id: messageData.userId,
+        text: messageData.text,
+        type: messageData.type || 'message',
+        attachments: messageData.attachments || [],
+        created_at: now
+    };
 
-db._saveCatalogToSupabase = async function() {
     try {
-        await supaRest.update('catalog', 'id=eq.1', { data: this.data.catalog });
-    } catch(e) { console.error('Supabase saveCatalog error:', e); }
+        await supaRest.insert('messages', supaMsg);
+    } catch(e) {
+        console.error('Erro Supabase addMessage:', e);
+    }
+
+    var localMsg = {
+        id: newId,
+        ticketId: messageData.ticketId,
+        userId: messageData.userId,
+        text: messageData.text,
+        type: messageData.type || 'message',
+        attachments: messageData.attachments || [],
+        createdAt: now
+    };
+
+    db.data.messages.push(localMsg);
+    db.saveToLocal();
+    return localMsg;
 };
 
-// Override SLA operations
-db.addSLA = async function(sla) {
-    var maxId = this.data.sla.reduce(function(max, s) {
-        var n = parseInt(s.id.replace('SLA', '')); return n > max ? n : max;
-    }, 0);
-    sla.id = 'SLA' + String(maxId + 1).padStart(3, '0');
-    sla.active = true;
-    this.data.sla.push(sla);
-    this.saveToLocal();
+// === Sobrescrever funções de catálogo ===
+db.addCategory = async function(categoryData) {
+    if (!db.data.catalog.categories) db.data.catalog.categories = [];
+    var maxNum = 0;
+    db.data.catalog.categories.forEach(function(c) {
+        var num = parseInt(c.id.replace('CAT', ''));
+        if (num > maxNum) maxNum = num;
+    });
+    var newId = 'CAT' + String(maxNum + 1).padStart(3, '0');
+    var cat = {
+        id: newId,
+        name: categoryData.name,
+        description: categoryData.description || '',
+        icon: categoryData.icon || 'fa-folder',
+        color: categoryData.color || '#6b7280',
+        active: true,
+        services: []
+    };
+    db.data.catalog.categories.push(cat);
+    await saveCatalogToSupabase();
+    db.saveToLocal();
+    return cat;
+};
+
+db.updateCategory = async function(catId, updates) {
+    var cat = db.data.catalog.categories.find(function(c) { return c.id === catId; });
+    if (cat) {
+        Object.assign(cat, updates);
+        await saveCatalogToSupabase();
+        db.saveToLocal();
+    }
+    return cat;
+};
+
+db.deleteCategory = async function(catId) {
+    db.data.catalog.categories = db.data.catalog.categories.filter(function(c) { return c.id !== catId; });
+    await saveCatalogToSupabase();
+    db.saveToLocal();
+};
+
+db.addService = async function(catId, serviceData) {
+    var cat = db.data.catalog.categories.find(function(c) { return c.id === catId; });
+    if (!cat) return null;
+    if (!cat.services) cat.services = [];
+    var maxNum = 0;
+    db.data.catalog.categories.forEach(function(c) {
+        if (c.services) c.services.forEach(function(s) {
+            var num = parseInt(s.id.replace('SRV', ''));
+            if (num > maxNum) maxNum = num;
+        });
+    });
+    var newId = 'SRV' + String(maxNum + 1).padStart(3, '0');
+    var srv = {
+        id: newId,
+        name: serviceData.name,
+        description: serviceData.description || '',
+        formFields: serviceData.formFields || ['description'],
+        slaId: serviceData.slaId || 'SLA001',
+        active: true
+    };
+    cat.services.push(srv);
+    await saveCatalogToSupabase();
+    db.saveToLocal();
+    return srv;
+};
+
+db.updateService = async function(catId, serviceId, updates) {
+    var cat = db.data.catalog.categories.find(function(c) { return c.id === catId; });
+    if (!cat || !cat.services) return null;
+    var srv = cat.services.find(function(s) { return s.id === serviceId; });
+    if (srv) {
+        Object.assign(srv, updates);
+        await saveCatalogToSupabase();
+        db.saveToLocal();
+    }
+    return srv;
+};
+
+db.deleteService = async function(catId, serviceId) {
+    var cat = db.data.catalog.categories.find(function(c) { return c.id === catId; });
+    if (cat && cat.services) {
+        cat.services = cat.services.filter(function(s) { return s.id !== serviceId; });
+        await saveCatalogToSupabase();
+        db.saveToLocal();
+    }
+};
+
+// Salvar catálogo inteiro no Supabase (uma linha com JSON)
+async function saveCatalogToSupabase() {
+    try {
+        await supaRest.upsert('catalog', { id: 1, data: db.data.catalog }, 'id');
+    } catch(e) {
+        console.error('Erro Supabase saveCatalog:', e);
+    }
+}
+
+// === Sobrescrever funções de SLA ===
+db.addSLA = async function(slaData) {
+    var maxNum = 0;
+    db.data.sla.forEach(function(s) {
+        var num = parseInt(s.id.replace('SLA', ''));
+        if (num > maxNum) maxNum = num;
+    });
+    var newId = 'SLA' + String(maxNum + 1).padStart(3, '0');
+    var slaItem = {
+        id: newId,
+        name: slaData.name,
+        hours: parseInt(slaData.hours),
+        countWeekends: slaData.countWeekends || false,
+        active: true
+    };
+    db.data.sla.push(slaItem);
+
     try {
         await supaRest.insert('sla', {
-            id: sla.id, name: sla.name, hours: sla.hours,
-            count_weekends: sla.countWeekends, active: sla.active
+            id: newId,
+            name: slaData.name,
+            hours: parseInt(slaData.hours),
+            count_weekends: slaData.countWeekends || false,
+            active: true
         });
-    } catch(e) { console.error('Supabase addSLA error:', e); }
+    } catch(e) {
+        console.error('Erro Supabase addSLA:', e);
+    }
+
+    db.saveToLocal();
+    return slaItem;
+};
+
+db.updateSLA = async function(slaId, updates) {
+    var sla = db.data.sla.find(function(s) { return s.id === slaId; });
+    if (sla) {
+        Object.assign(sla, updates);
+        var supaUpdates = {};
+        if (updates.name !== undefined) supaUpdates.name = updates.name;
+        if (updates.hours !== undefined) supaUpdates.hours = parseInt(updates.hours);
+        if (updates.countWeekends !== undefined) supaUpdates.count_weekends = updates.countWeekends;
+        if (updates.active !== undefined) supaUpdates.active = updates.active;
+        try {
+            await supaRest.update('sla', 'id=eq.' + slaId, supaUpdates);
+        } catch(e) {
+            console.error('Erro Supabase updateSLA:', e);
+        }
+        db.saveToLocal();
+    }
     return sla;
 };
 
-db.updateSLA = async function(id, updates) {
-    var idx = this.data.sla.findIndex(function(s) { return s.id === id; });
-    if (idx >= 0) {
-        Object.assign(this.data.sla[idx], updates);
-        this.saveToLocal();
-        try {
-            var dbUp = {};
-            if (updates.name) dbUp.name = updates.name;
-            if (updates.hours) dbUp.hours = updates.hours;
-            if (updates.countWeekends !== undefined) dbUp.count_weekends = updates.countWeekends;
-            if (updates.active !== undefined) dbUp.active = updates.active;
-            await supaRest.update('sla', 'id=eq.' + id, dbUp);
-        } catch(e) { console.error('Supabase updateSLA error:', e); }
-        return this.data.sla[idx];
+db.deleteSLA = async function(slaId) {
+    db.data.sla = db.data.sla.filter(function(s) { return s.id !== slaId; });
+    try {
+        await supaRest.remove('sla', 'id=eq.' + slaId);
+    } catch(e) {
+        console.error('Erro Supabase deleteSLA:', e);
     }
-    return null;
+    db.saveToLocal();
 };
 
-// Override renderAdminSettings para remover GitHub config
+// === Tela de Configurações simplificada ===
 renderAdminSettings = function(container) {
     container.innerHTML = '<div class="page-header"><h2><i class="fas fa-cog"></i> Configuracoes</h2></div>' +
-        '<div class="card"><div class="card-header"><h3><i class="fas fa-cloud"></i> Banco de Dados na Nuvem (Supabase)</h3></div>' +
+        '<div class="card"><div class="card-header"><h3><i class="fas fa-database"></i> Banco de Dados — Supabase</h3></div>' +
         '<div class="card-body">' +
-        '<div style="background:#ecfdf5;border:1px solid #059669;border-radius:8px;padding:16px;margin-bottom:20px;">' +
+        '<div style="background:#ecfdf5;border:1px solid #059669;border-radius:8px;padding:16px;margin-bottom:24px;">' +
         '<div style="display:flex;align-items:center;gap:8px;color:#059669;font-weight:600;margin-bottom:8px;">' +
         '<i class="fas fa-check-circle"></i> Conectado ao Supabase</div>' +
         '<div style="font-size:13px;color:#374151;">' +
-        '<div><strong>Servidor:</strong> fnihosrvwitlnnlcarpf.supabase.co</div>' +
-        '<div><strong>Ultima sincronizacao:</strong> ' + formatDate(new Date().toISOString()) + '</div>' +
+        '<div><strong>Projeto:</strong> fnihosrvwitlnnlcarpf</div>' +
+        '<div><strong>Tipo:</strong> PostgreSQL (Supabase REST API)</div>' +
+        '<div><strong>Sincronizacao:</strong> Automatica em tempo real</div>' +
         '</div></div>' +
-        '<p style="color:var(--gray-500);margin-bottom:16px;">Os dados sao sincronizados automaticamente com a nuvem. Nenhuma configuracao adicional necessaria.</p>' +
-        '<div style="display:flex;gap:12px;flex-wrap:wrap;">' +
-        '<button class="btn btn-success" onclick="forceSupabaseSync()"><i class="fas fa-sync"></i> Sincronizar Agora</button>' +
-        '</div>' +
-        '<div id="config-log" style="margin-top:20px;"></div>' +
-        '</div></div>' +
-        '<div class="card" style="margin-top:20px;"><div class="card-header"><h3><i class="fas fa-database"></i> Dados</h3></div>' +
-        '<div class="card-body">' +
-        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;">' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:16px;">' +
         '<div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">' +
         '<div style="font-size:24px;font-weight:700;color:var(--primary);">' + db.data.users.length + '</div><div style="font-size:12px;color:var(--gray-400);">Usuarios</div></div>' +
         '<div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">' +
         '<div style="font-size:24px;font-weight:700;color:var(--primary);">' + db.data.tickets.length + '</div><div style="font-size:12px;color:var(--gray-400);">Chamados</div></div>' +
         '<div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">' +
-        '<div style="font-size:24px;font-weight:700;color:var(--primary);">' + db.data.catalog.categories.length + '</div><div style="font-size:12px;color:var(--gray-400);">Categorias</div></div>' +
+        '<div style="font-size:24px;font-weight:700;color:var(--primary);">' + (db.data.catalog.categories ? db.data.catalog.categories.length : 0) + '</div><div style="font-size:12px;color:var(--gray-400);">Categorias</div></div>' +
         '<div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">' +
         '<div style="font-size:24px;font-weight:700;color:var(--primary);">' + db.data.messages.length + '</div><div style="font-size:12px;color:var(--gray-400);">Mensagens</div></div>' +
-        '</div></div></div>';
+        '</div>' +
+        '<div style="display:flex;gap:12px;flex-wrap:wrap;">' +
+        '<button class="btn btn-primary" onclick="reloadFromSupabase()"><i class="fas fa-sync"></i> Recarregar Dados</button>' +
+        '</div>' +
+        '</div></div>';
 };
 
-async function forceSupabaseSync() {
-    showToast('Sincronizando com Supabase...', 'info');
-    try {
-        await db.loadFromSupabase();
-        showToast('Sincronizado! ' + db.data.users.length + ' usuarios, ' + db.data.tickets.length + ' chamados.', 'success');
+async function reloadFromSupabase() {
+    showToast('Recarregando do Supabase...', 'info');
+    var ok = await loadFromSupabase();
+    if (ok) {
+        showToast('Dados atualizados!', 'success');
         renderAdminSettings(document.getElementById('content'));
-    } catch(e) {
-        showToast('Erro: ' + e.message, 'error');
+    } else {
+        showToast('Erro ao recarregar', 'error');
     }
 }
 
-console.log('Supabase DB module loaded');
+console.log('supabase-db.js carregado');
