@@ -1,6 +1,6 @@
 // ============================================
-// SUPABASE DATABASE LAYER
-// Substitui GitHub como backend. Sem token!
+// SUPABASE DATABASE LAYER — v3 CORRIGIDO
+// Colunas: created_by (não user_id), subject (não title)
 // ============================================
 
 var SUPABASE_URL = 'https://fnihosrvwitlnnlcarpf.supabase.co';
@@ -16,7 +16,6 @@ var supaRest = {
             'Prefer': 'return=representation'
         };
     },
-
     select: async function(table, query) {
         var url = SUPABASE_URL + '/rest/v1/' + table;
         if (query) url += '?' + query;
@@ -27,7 +26,6 @@ var supaRest = {
         }
         return await resp.json();
     },
-
     insert: async function(table, data) {
         var resp = await fetch(SUPABASE_URL + '/rest/v1/' + table, {
             method: 'POST',
@@ -40,7 +38,6 @@ var supaRest = {
         }
         return await resp.json();
     },
-
     update: async function(table, matchQuery, data) {
         var resp = await fetch(SUPABASE_URL + '/rest/v1/' + table + '?' + matchQuery, {
             method: 'PATCH',
@@ -53,7 +50,6 @@ var supaRest = {
         }
         return await resp.json();
     },
-
     remove: async function(table, matchQuery) {
         var resp = await fetch(SUPABASE_URL + '/rest/v1/' + table + '?' + matchQuery, {
             method: 'DELETE',
@@ -65,7 +61,6 @@ var supaRest = {
         }
         return true;
     },
-
     upsert: async function(table, data, onConflict) {
         var h = this.headers();
         h['Prefer'] = 'return=representation,resolution=merge-duplicates';
@@ -91,11 +86,22 @@ async function loadFromSupabase() {
         // Users
         var users = await supaRest.select('users', 'select=*&order=created_at.asc');
         if (users && users.length > 0) {
-            db.data.users = users;
+            db.data.users = users.map(function(u) {
+                return {
+                    id: u.id,
+                    name: u.name,
+                    email: u.email,
+                    password: u.password,
+                    role: u.role,
+                    active: u.active,
+                    createdAt: u.created_at,
+                    created_at: u.created_at
+                };
+            });
             console.log('Supabase users:', users.length);
         }
 
-        // Tickets
+        // Tickets — colunas reais: created_by, subject (NÃO user_id, title)
         var tickets = await supaRest.select('tickets', 'select=*&order=created_at.desc');
         if (tickets) {
             db.data.tickets = tickets.map(function(t) {
@@ -103,15 +109,14 @@ async function loadFromSupabase() {
                 if (typeof t.form_data === 'string') try { t.form_data = JSON.parse(t.form_data); } catch(e) { t.form_data = {}; }
                 if (!t.history) t.history = [];
                 if (!t.form_data) t.form_data = {};
-                // Mapear snake_case para camelCase - manter AMBOS createdBy e userId
                 return {
                     id: t.id,
-                    createdBy: t.user_id,
-                    userId: t.user_id,
+                    createdBy: t.created_by,
+                    userId: t.created_by,
                     categoryId: t.category_id,
                     serviceId: t.service_id,
-                    subject: t.title,
-                    title: t.title,
+                    subject: t.subject,
+                    title: t.subject,
                     description: t.description,
                     priority: t.priority,
                     status: t.status,
@@ -120,7 +125,7 @@ async function loadFromSupabase() {
                     slaDeadline: t.sla_deadline || null,
                     createdAt: t.created_at,
                     updatedAt: t.updated_at,
-                    closedAt: t.closed_at,
+                    closedAt: t.closed_at || null,
                     formData: t.form_data,
                     history: t.history,
                     attachments: t.attachments || [],
@@ -149,7 +154,7 @@ async function loadFromSupabase() {
             console.log('Supabase messages:', db.data.messages.length);
         }
 
-        // Catalog (armazenado como JSON numa unica linha)
+        // Catalog
         var catalog = await supaRest.select('catalog', 'select=*');
         if (catalog && catalog.length > 0 && catalog[0].data) {
             db.data.catalog = catalog[0].data;
@@ -180,15 +185,14 @@ async function loadFromSupabase() {
 }
 
 // === Sobrescrever db.addUser ===
-var _origAddUser = db.addUser.bind(db);
 db.addUser = async function(userData) {
-    // Gerar ID
     var maxNum = 0;
     db.data.users.forEach(function(u) {
         var num = parseInt(u.id.replace('USR', ''));
         if (num > maxNum) maxNum = num;
     });
     var newId = 'USR' + String(maxNum + 1).padStart(3, '0');
+    var now = new Date().toISOString();
 
     var newUser = {
         id: newId,
@@ -197,40 +201,33 @@ db.addUser = async function(userData) {
         password: userData.password,
         role: userData.role || 'user',
         active: true,
-        created_at: new Date().toISOString()
+        created_at: now
     };
 
     try {
-        var result = await supaRest.insert('users', newUser);
-        // Adicionar ao db.data com formato local
-        var localUser = Object.assign({}, newUser);
-        localUser.createdAt = newUser.created_at;
-        db.data.users.push(localUser);
-        db.saveToLocal();
+        await supaRest.insert('users', newUser);
         console.log('Usuario criado no Supabase:', newId);
-        return localUser;
     } catch(e) {
         console.error('Erro Supabase addUser:', e);
-        // Fallback local
-        var localUser = {
-            id: newId,
-            name: userData.name,
-            email: userData.email,
-            password: userData.password,
-            role: userData.role || 'user',
-            active: true,
-            createdAt: new Date().toISOString()
-        };
-        db.data.users.push(localUser);
-        db.saveToLocal();
-        return localUser;
     }
+
+    var localUser = {
+        id: newId,
+        name: userData.name,
+        email: userData.email,
+        password: userData.password,
+        role: userData.role || 'user',
+        active: true,
+        createdAt: now,
+        created_at: now
+    };
+    db.data.users.push(localUser);
+    db.saveToLocal();
+    return localUser;
 };
 
 // === Sobrescrever db.updateUser ===
-var _origUpdateUser = db.updateUser ? db.updateUser.bind(db) : null;
 db.updateUser = async function(userId, updates) {
-    // Atualizar no Supabase
     var supaUpdates = {};
     if (updates.name !== undefined) supaUpdates.name = updates.name;
     if (updates.email !== undefined) supaUpdates.email = updates.email;
@@ -244,7 +241,6 @@ db.updateUser = async function(userId, updates) {
         console.error('Erro Supabase updateUser:', e);
     }
 
-    // Atualizar local
     var user = db.data.users.find(function(u) { return u.id === userId; });
     if (user) {
         Object.assign(user, updates);
@@ -265,7 +261,7 @@ db.deleteUser = async function(userId) {
 };
 
 // === Sobrescrever db.addTicket ===
-var _origAddTicket = db.addTicket ? db.addTicket.bind(db) : null;
+// CORRIGIDO: usa created_by e subject (nomes reais das colunas)
 db.addTicket = async function(ticketData) {
     var year = new Date().getFullYear();
     var maxNum = 0;
@@ -277,12 +273,12 @@ db.addTicket = async function(ticketData) {
         }
     });
     var newId = 'CHM-' + year + '-' + String(maxNum + 1).padStart(5, '0');
-
     var now = new Date().toISOString();
-    
+
     // Compatibilidade: aceitar tanto createdBy quanto userId
     var theUserId = ticketData.createdBy || ticketData.userId || (currentUser ? currentUser.id : '');
-    
+    var theSubject = ticketData.subject || ticketData.title || '';
+
     var sla = db.getSLAById(ticketData.slaId);
     var slaDeadline = sla ? db.calculateSLADeadline(now, sla) : null;
 
@@ -293,18 +289,19 @@ db.addTicket = async function(ticketData) {
         details: 'Chamado criado no sistema'
     }];
 
-    // Objeto para Supabase (snake_case)
+    // Objeto para Supabase — COLUNAS REAIS: created_by, subject
     var supaTicket = {
         id: newId,
-        user_id: theUserId,
+        created_by: theUserId,
         category_id: ticketData.categoryId,
         service_id: ticketData.serviceId,
-        title: ticketData.subject || ticketData.title || '',
+        subject: theSubject,
         description: ticketData.description || '',
         priority: ticketData.priority || 'media',
         status: 'aberto',
         assigned_to: ticketData.assignedTo || null,
         sla_id: ticketData.slaId || 'SLA001',
+        sla_deadline: slaDeadline,
         created_at: now,
         updated_at: now,
         closed_at: null,
@@ -317,18 +314,19 @@ db.addTicket = async function(ticketData) {
         await supaRest.insert('tickets', supaTicket);
         console.log('Ticket criado no Supabase:', newId);
     } catch(e) {
-        console.error('Erro Supabase addTicket:', e);
+        console.error('ERRO Supabase addTicket:', e);
+        showToast('Erro ao salvar chamado no servidor: ' + e.message, 'error');
     }
 
-    // Objeto local (camelCase) — manter AMBOS createdBy e userId
+    // Objeto local (camelCase) - manter AMBOS createdBy e userId
     var localTicket = {
         id: newId,
         createdBy: theUserId,
         userId: theUserId,
         categoryId: ticketData.categoryId,
         serviceId: ticketData.serviceId,
-        subject: ticketData.subject || ticketData.title || '',
-        title: ticketData.subject || ticketData.title || '',
+        subject: theSubject,
+        title: theSubject,
         description: ticketData.description || '',
         priority: ticketData.priority || 'media',
         status: 'aberto',
@@ -350,17 +348,16 @@ db.addTicket = async function(ticketData) {
     return localTicket;
 };
 
-
 // === Sobrescrever db.updateTicket ===
+// CORRIGIDO: usa created_by, subject, closed_at
 db.updateTicket = async function(ticketId, updates) {
     var ticket = db.data.tickets.find(function(t) { return t.id === ticketId; });
     if (!ticket) return null;
 
-    // Aplicar updates localmente
     Object.assign(ticket, updates);
     ticket.updatedAt = new Date().toISOString();
 
-    // Preparar updates para Supabase (snake_case)
+    // Mapear camelCase → snake_case para Supabase
     var supaUpdates = { updated_at: ticket.updatedAt };
     if (updates.status !== undefined) supaUpdates.status = updates.status;
     if (updates.priority !== undefined) supaUpdates.priority = updates.priority;
@@ -368,6 +365,10 @@ db.updateTicket = async function(ticketId, updates) {
     if (updates.closedAt !== undefined) supaUpdates.closed_at = updates.closedAt;
     if (updates.history !== undefined) supaUpdates.history = updates.history;
     if (updates.description !== undefined) supaUpdates.description = updates.description;
+    if (updates.subject !== undefined) supaUpdates.subject = updates.subject;
+    if (updates.resolvedAt !== undefined) supaUpdates.resolved_at = updates.resolvedAt;
+    if (updates.acceptanceDeadline !== undefined) supaUpdates.acceptance_deadline = updates.acceptanceDeadline;
+    if (updates.satisfactionSent !== undefined) supaUpdates.satisfaction_sent = updates.satisfactionSent;
 
     try {
         await supaRest.update('tickets', 'id=eq.' + ticketId, supaUpdates);
@@ -386,9 +387,9 @@ db.addTicketHistory = async function(ticketId, action, userId, details) {
 
     if (!ticket.history) ticket.history = [];
     var entry = {
-        date: new Date().toISOString(),
         action: action,
-        userId: userId,
+        by: userId,
+        at: new Date().toISOString(),
         details: details || ''
     };
     ticket.history.push(entry);
@@ -411,7 +412,7 @@ db.addMessage = async function(messageData) {
     var maxNum = 0;
     db.data.messages.forEach(function(m) {
         var num = parseInt(m.id.replace('MSG', ''));
-        if (num > maxNum) maxNum = num;
+        if (!isNaN(num) && num > maxNum) maxNum = num;
     });
     var newId = 'MSG' + String(maxNum + 1).padStart(5, '0');
     var now = new Date().toISOString();
@@ -447,7 +448,7 @@ db.addMessage = async function(messageData) {
     return localMsg;
 };
 
-// === Sobrescrever funções de catálogo ===
+// === Funções de catálogo ===
 db.addCategory = async function(categoryData) {
     if (!db.data.catalog.categories) db.data.catalog.categories = [];
     var maxNum = 0;
@@ -534,7 +535,6 @@ db.deleteService = async function(catId, serviceId) {
     }
 };
 
-// Salvar catálogo inteiro no Supabase (uma linha com JSON)
 async function saveCatalogToSupabase() {
     try {
         await supaRest.upsert('catalog', { id: 1, data: db.data.catalog }, 'id');
@@ -543,7 +543,7 @@ async function saveCatalogToSupabase() {
     }
 }
 
-// === Sobrescrever funções de SLA ===
+// === Funções de SLA ===
 db.addSLA = async function(slaData) {
     var maxNum = 0;
     db.data.sla.forEach(function(s) {
@@ -559,7 +559,6 @@ db.addSLA = async function(slaData) {
         active: true
     };
     db.data.sla.push(slaItem);
-
     try {
         await supaRest.insert('sla', {
             id: newId,
@@ -571,7 +570,6 @@ db.addSLA = async function(slaData) {
     } catch(e) {
         console.error('Erro Supabase addSLA:', e);
     }
-
     db.saveToLocal();
     return slaItem;
 };
@@ -605,10 +603,10 @@ db.deleteSLA = async function(slaId) {
     db.saveToLocal();
 };
 
-// === Tela de Configurações simplificada ===
+// === Tela de Configurações ===
 renderAdminSettings = function(container) {
     container.innerHTML = '<div class="page-header"><h2><i class="fas fa-cog"></i> Configuracoes</h2></div>' +
-        '<div class="card"><div class="card-header"><h3><i class="fas fa-database"></i> Banco de Dados — Supabase</h3></div>' +
+        '<div class="card"><div class="card-header"><h3><i class="fas fa-database"></i> Banco de Dados - Supabase</h3></div>' +
         '<div class="card-body">' +
         '<div style="background:#ecfdf5;border:1px solid #059669;border-radius:8px;padding:16px;margin-bottom:24px;">' +
         '<div style="display:flex;align-items:center;gap:8px;color:#059669;font-weight:600;margin-bottom:8px;">' +
@@ -628,9 +626,7 @@ renderAdminSettings = function(container) {
         '<div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">' +
         '<div style="font-size:24px;font-weight:700;color:var(--primary);">' + db.data.messages.length + '</div><div style="font-size:12px;color:var(--gray-400);">Mensagens</div></div>' +
         '</div>' +
-        '<div style="display:flex;gap:12px;flex-wrap:wrap;">' +
         '<button class="btn btn-primary" onclick="reloadFromSupabase()"><i class="fas fa-sync"></i> Recarregar Dados</button>' +
-        '</div>' +
         '</div></div>';
 };
 
@@ -645,4 +641,4 @@ async function reloadFromSupabase() {
     }
 }
 
-console.log('supabase-db.js carregado');
+console.log('supabase-db.js v3 carregado (created_by/subject)');
