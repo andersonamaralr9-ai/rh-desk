@@ -880,4 +880,82 @@ function parseBRDate(str) {
     return parts[2] + '-' + parts[1] + '-' + parts[0];
 }
 
+// ============================================
+// 8. BOTÃO "ATRIBUIR A MIM" NO TICKET DETAIL
+// ============================================
+async function assignToMe(ticketId) {
+    var ticket = db.getTicketById(ticketId);
+    if (!ticket) return;
+    
+    ticket.assignedTo = currentUser.id;
+    ticket.updatedAt = new Date().toISOString();
+    if (ticket.status === 'aberto') ticket.status = 'em-andamento';
+    if (!ticket.history) ticket.history = [];
+    ticket.history.push({
+        action: 'Chamado atribuido',
+        by: currentUser.id,
+        at: new Date().toISOString(),
+        details: 'Atribuido a ' + currentUser.name
+    });
+    
+    try {
+        await supaRest.update('tickets', 'id=eq.' + ticketId, {
+            assigned_to: currentUser.id,
+            status: ticket.status,
+            updated_at: ticket.updatedAt,
+            history: ticket.history
+        });
+    } catch(e) { console.error('Erro assignToMe:', e); }
+    
+    db.saveToLocal();
+    showToast('Chamado atribuido a voce!', 'success');
+    buildSidebar();
+    navigateTo('ticket-detail', { id: ticketId });
+}
+
+// Injetar botão "Atribuir a mim" na tela de detalhes do ticket
+var _checkInjectAssignBtn = setInterval(function() {
+    var content = document.getElementById('content');
+    if (!content) return;
+    
+    // Detectar se estamos na tela de ticket-detail
+    var header = content.querySelector('.page-header');
+    if (!header) return;
+    var headerText = header.textContent || '';
+    if (headerText.indexOf('CHM-') < 0) return;
+    
+    // Extrair o ticket ID
+    var ticketIdMatch = headerText.match(/(CHM-\d{4}-\d{5})/);
+    if (!ticketIdMatch) return;
+    var ticketId = ticketIdMatch[1];
+    var ticket = db.getTicketById(ticketId);
+    if (!ticket) return;
+    
+    // Só mostrar se é analista/admin E não está atribuído a ele E não está fechado/cancelado
+    if (!isAnalyst()) return;
+    if (ticket.assignedTo === currentUser.id) return;
+    if (ticket.status === 'fechado' || ticket.status === 'cancelado') return;
+    
+    // Verificar se já injetou
+    if (document.getElementById('btn-assign-me')) return;
+    
+    // Encontrar a área de botões no header
+    var btnArea = header.querySelector('div');
+    if (!btnArea) {
+        // Criar área de botões se não existe
+        btnArea = document.createElement('div');
+        btnArea.style.cssText = 'display:flex;gap:8px;';
+        header.appendChild(btnArea);
+    }
+    
+    // Inserir botão "Atribuir a mim" ANTES dos outros botões
+    var assignBtn = document.createElement('button');
+    assignBtn.id = 'btn-assign-me';
+    assignBtn.className = 'btn btn-primary';
+    assignBtn.innerHTML = '<i class="fas fa-hand-point-up"></i> Atribuir a mim';
+    assignBtn.onclick = function() { assignToMe(ticketId); };
+    btnArea.insertBefore(assignBtn, btnArea.firstChild);
+    
+}, 500);
+
 console.log('features.js carregado');
