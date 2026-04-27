@@ -958,4 +958,176 @@ var _checkInjectAssignBtn = setInterval(function() {
     
 }, 500);
 
+// ============================================
+// 9. CATEGORIAS VISÍVEIS POR USUÁRIO
+// ============================================
+
+// Sobrescrever renderAdminUsers para adicionar coluna de categorias
+var _origRenderAdminUsers2 = typeof renderAdminUsers === 'function' ? renderAdminUsers : null;
+var _alreadyOverrodeAdminUsers = false;
+
+// Função para abrir modal de editar categorias do usuário
+function showUserCategoriesModal(userId) {
+    var user = db.getUserById(userId);
+    if (!user) return;
+    
+    var categories = db.data.catalog.categories || [];
+    var allowed = user.allowedCategories || [];
+    var isAll = !allowed || allowed.length === 0; // vazio = todas
+    
+    var bodyHtml = '<div style="margin-bottom:16px;">' +
+        '<p>Selecione quais categorias <strong>' + escapeHtml(user.name) + '</strong> pode ver ao abrir chamados.</p>' +
+        '<p style="font-size:13px;color:var(--gray-500);">Se nenhuma for marcada, o usuario vera TODAS as categorias.</p></div>' +
+        '<div class="form-group"><label><input type="checkbox" id="cat-select-all" ' + (isAll ? 'checked' : '') + ' onchange="toggleAllCategories(this)"> <strong>Todas as categorias</strong></label></div>' +
+        '<div id="cat-checkboxes" style="' + (isAll ? 'opacity:0.5;pointer-events:none;' : '') + 'max-height:300px;overflow-y:auto;padding:8px 0;">';
+    
+    categories.forEach(function(cat) {
+        var checked = isAll || allowed.indexOf(cat.id) >= 0;
+        bodyHtml += '<div style="padding:6px 0;border-bottom:1px solid var(--gray-100);">' +
+            '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
+            '<input type="checkbox" class="cat-check" value="' + cat.id + '" ' + (checked ? 'checked' : '') + '>' +
+            '<i class="fas ' + cat.icon + '" style="color:' + cat.color + ';width:20px;text-align:center;"></i>' +
+            '<span>' + escapeHtml(cat.name) + '</span>' +
+            '</label></div>';
+    });
+    bodyHtml += '</div>';
+    
+    var footerHtml = '<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>' +
+        '<button class="btn btn-primary" onclick="saveUserCategories(\'' + userId + '\')"><i class="fas fa-save"></i> Salvar</button>';
+    
+    openModal('Categorias Visiveis - ' + user.name, bodyHtml, footerHtml);
+}
+
+function toggleAllCategories(checkbox) {
+    var container = document.getElementById('cat-checkboxes');
+    if (checkbox.checked) {
+        container.style.opacity = '0.5';
+        container.style.pointerEvents = 'none';
+        document.querySelectorAll('.cat-check').forEach(function(cb) { cb.checked = true; });
+    } else {
+        container.style.opacity = '1';
+        container.style.pointerEvents = 'auto';
+    }
+}
+
+async function saveUserCategories(userId) {
+    var isAll = document.getElementById('cat-select-all').checked;
+    var allowed = [];
+    
+    if (!isAll) {
+        document.querySelectorAll('.cat-check:checked').forEach(function(cb) {
+            allowed.push(cb.value);
+        });
+    }
+    // allowed vazio = todas
+    
+    var user = db.data.users.find(function(u) { return u.id === userId; });
+    if (user) {
+        user.allowedCategories = allowed;
+    }
+    
+    try {
+        await supaRest.update('users', 'id=eq.' + userId, {
+            allowed_categories: allowed
+        });
+    } catch(e) {
+        console.error('Erro salvar categorias usuario:', e);
+    }
+    
+    db.saveToLocal();
+    closeModal();
+    showToast('Categorias atualizadas para ' + (user ? user.name : userId) + '!', 'success');
+    navigateTo('admin-users');
+}
+
+// Sobrescrever renderNewTicket para filtrar categorias pelo usuario logado
+var _origRenderNewTicket = renderNewTicket;
+renderNewTicket = function(container) {
+    var allowed = currentUser.allowedCategories || [];
+    var categories;
+    
+    if (allowed.length === 0) {
+        // Sem restrição — mostra todas ativas
+        categories = db.getCategories();
+    } else {
+        // Filtra só as permitidas E ativas
+        categories = db.getCategories().filter(function(cat) {
+            return allowed.indexOf(cat.id) >= 0;
+        });
+    }
+    
+    var html = '<div class="page-header"><h2><i class="fas fa-plus-circle"></i> Abrir Chamado</h2></div>' +
+        '<p style="color:var(--gray-500);margin-bottom:24px;">Selecione a categoria:</p><div class="catalog-grid">';
+    
+    categories.forEach(function(cat) {
+        var activeServices = cat.services.filter(function(s) { return s.active !== false; });
+        html += '<div class="catalog-card" onclick="navigateTo(\'catalog-services\',{categoryId:\'' + cat.id + '\'})">' +
+            '<div class="catalog-card-icon" style="background:' + cat.color + '15;color:' + cat.color + '"><i class="fas ' + cat.icon + '"></i></div>' +
+            '<h3>' + escapeHtml(cat.name) + '</h3><p>' + escapeHtml(cat.description) + '</p>' +
+            '<div class="service-count">' + activeServices.length + ' servico(s)</div></div>';
+    });
+    
+    if (categories.length === 0) {
+        html += '<div class="empty-state"><i class="fas fa-folder-open"></i><h3>Nenhuma categoria disponivel</h3><p>Contate o administrador.</p></div>';
+    }
+    
+    container.innerHTML = html + '</div>';
+};
+
+// Injetar botão de categorias na lista de usuários admin
+var _checkInjectCatBtn = setInterval(function() {
+    var content = document.getElementById('content');
+    if (!content) return;
+    if (!isAdmin()) return;
+    
+    // Detectar tabela de usuários
+    var tables = content.querySelectorAll('table');
+    if (tables.length === 0) return;
+    
+    tables.forEach(function(table) {
+        var rows = table.querySelectorAll('tbody tr');
+        rows.forEach(function(row) {
+            // Verificar se já tem botão de categorias
+            if (row.querySelector('.btn-cat-config')) return;
+            
+            // Encontrar o user ID na row
+            var firstCell = row.querySelector('td');
+            if (!firstCell) return;
+            var userId = firstCell.textContent.trim();
+            if (userId.indexOf('USR') !== 0) return;
+            
+            // Encontrar a coluna de ações
+            var actionCell = row.querySelector('td:last-child');
+            if (!actionCell) return;
+            var btnContainer = actionCell.querySelector('div') || actionCell;
+            
+            // Adicionar botão de categorias
+            var catBtn = document.createElement('button');
+            catBtn.className = 'btn btn-sm btn-secondary btn-cat-config';
+            catBtn.title = 'Categorias visiveis';
+            catBtn.innerHTML = '<i class="fas fa-th-large"></i>';
+            catBtn.onclick = function(e) { 
+                e.stopPropagation(); 
+                showUserCategoriesModal(userId); 
+            };
+            btnContainer.appendChild(catBtn);
+        });
+    });
+}, 1000);
+
+// Ajustar loadFromSupabase para carregar allowedCategories
+var _origLoadUsers = loadFromSupabase;
+// Nota: o campo allowed_categories já será carregado automaticamente pelo select=*
+// Precisamos apenas mapear no carregamento
+var _patchUsersInterval = setInterval(function() {
+    if (!db.data.users || db.data.users.length === 0) return;
+    db.data.users.forEach(function(u) {
+        if (u.allowed_categories !== undefined && u.allowedCategories === undefined) {
+            u.allowedCategories = u.allowed_categories || [];
+        }
+        if (!u.allowedCategories) u.allowedCategories = [];
+    });
+    clearInterval(_patchUsersInterval);
+}, 2000);
+
 console.log('features.js carregado');
