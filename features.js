@@ -287,7 +287,7 @@ function renderReports(container) {
     });
     
     container.innerHTML = '<div class="page-header"><h2><i class="fas fa-chart-bar"></i> Relatorios</h2>' +
-        '<button class="btn btn-success" onclick="exportReportCSV()"><i class="fas fa-file-csv"></i> Exportar CSV</button></div>' +
+        '<button class="btn btn-success" onclick="exportReportCSV()"><i class="fas fa-file-excel"></i> Exportar Excel</button></div>' +
         
         // Filtros
         '<div class="card" style="margin-bottom:20px;"><div class="card-body">' +
@@ -418,20 +418,25 @@ function applyReportFilters() {
 function exportReportCSV() {
     var tickets = getFilteredTickets();
     if (tickets.length === 0) { showToast('Nenhum dado para exportar', 'warning'); return; }
-    
-    var header = 'Numero;Assunto;Categoria;Solicitante;Atendente;Status;Prioridade;SLA Status;Abertura;Fechamento;Tempo (horas)';
-    var lines = [header];
-    
+
+    if (typeof XLSX === 'undefined') {
+        showToast('Biblioteca Excel nao carregada. Tente novamente.', 'error');
+        return;
+    }
+
+    // === ABA 1: CHAMADOS ===
+    var chamadosData = [
+        ['No', 'Assunto', 'Categoria', 'Solicitante', 'Atendente', 'Status', 'Prioridade', 'SLA', 'Abertura', 'Fechamento', 'Tempo (horas)']
+    ];
     tickets.forEach(function(t) {
         var cat = db.getCategoryById(t.categoryId);
         var user = db.getUserById(t.createdBy || t.userId);
         var analyst = t.assignedTo ? db.getUserById(t.assignedTo) : null;
         var sla = db.getSLAStatus(t);
         var hours = t.closedAt && t.createdAt ? Math.round((new Date(t.closedAt) - new Date(t.createdAt)) / 3600000) : '';
-        
-        lines.push([
+        chamadosData.push([
             t.id,
-            (t.subject || t.title || '').replace(/;/g, ','),
+            t.subject || t.title || '',
             cat ? cat.name : 'N/A',
             user ? user.name : 'N/A',
             analyst ? analyst.name : 'Nao atribuido',
@@ -441,20 +446,113 @@ function exportReportCSV() {
             t.createdAt ? new Date(t.createdAt).toLocaleString('pt-BR') : '',
             t.closedAt ? new Date(t.closedAt).toLocaleString('pt-BR') : '',
             hours
-        ].join(';'));
+        ]);
     });
-    
-    var BOM = '\uFEFF';
-    var blob = new Blob([BOM + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = 'relatorio_chamados_' + new Date().toISOString().slice(0, 10) + '.csv';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showToast('Relatorio exportado!', 'success');
+
+    var wb = XLSX.utils.book_new();
+    var ws1 = XLSX.utils.aoa_to_sheet(chamadosData);
+
+    // Largura das colunas
+    ws1['!cols'] = [
+        { wch: 18 }, { wch: 35 }, { wch: 22 }, { wch: 22 }, { wch: 22 },
+        { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 20 }, { wch: 20 }, { wch: 12 }
+    ];
+    XLSX.utils.book_append_sheet(wb, ws1, 'Chamados');
+
+    // === ABA 2: RESUMO ===
+    var total = tickets.length;
+    var abertos = tickets.filter(function(t) { return t.status === 'aberto'; }).length;
+    var emAndamento = tickets.filter(function(t) { return t.status === 'em-andamento'; }).length;
+    var pendentes = tickets.filter(function(t) { return t.status === 'pendente'; }).length;
+    var resolvidos = tickets.filter(function(t) { return t.status === 'resolvido'; }).length;
+    var fechados = tickets.filter(function(t) { return t.status === 'fechado'; }).length;
+    var cancelados = tickets.filter(function(t) { return t.status === 'cancelado'; }).length;
+    var foraSLA = tickets.filter(function(t) { return db.getSLAStatus(t).status === 'danger'; }).length;
+    var dentroSLA = total - foraSLA;
+    var pctSLA = total > 0 ? Math.round((dentroSLA / total) * 100) + '%' : 'N/A';
+
+    var closedT = tickets.filter(function(t) { return t.closedAt && t.createdAt; });
+    var avgHours = 0;
+    if (closedT.length > 0) {
+        avgHours = Math.round(closedT.reduce(function(s, t) {
+            return s + (new Date(t.closedAt) - new Date(t.createdAt)) / 3600000;
+        }, 0) / closedT.length);
+    }
+
+    var resumoData = [
+        ['RELATORIO DE CHAMADOS - RH DESK'],
+        ['Gerado em', new Date().toLocaleString('pt-BR')],
+        [],
+        ['INDICADOR', 'VALOR'],
+        ['Total de chamados', total],
+        ['Abertos', abertos],
+        ['Em andamento', emAndamento],
+        ['Pendentes', pendentes],
+        ['Resolvidos', resolvidos],
+        ['Fechados', fechados],
+        ['Cancelados', cancelados],
+        [],
+        ['DESEMPENHO SLA', ''],
+        ['Dentro do prazo', dentroSLA],
+        ['Fora do prazo', foraSLA],
+        ['% Dentro do SLA', pctSLA],
+        ['Tempo medio resolucao', avgHours + ' horas']
+    ];
+
+    var ws2 = XLSX.utils.aoa_to_sheet(resumoData);
+    ws2['!cols'] = [{ wch: 28 }, { wch: 22 }];
+    // Merge titulo
+    ws2['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Resumo');
+
+    // === ABA 3: POR CATEGORIA ===
+    var catMap = {};
+    tickets.forEach(function(t) {
+        var cat = db.getCategoryById(t.categoryId);
+        var catName = cat ? cat.name : 'Sem categoria';
+        if (!catMap[catName]) catMap[catName] = { total: 0, abertos: 0, fechados: 0, foraSLA: 0 };
+        catMap[catName].total++;
+        if (t.status === 'aberto') catMap[catName].abertos++;
+        if (t.status === 'fechado') catMap[catName].fechados++;
+        if (db.getSLAStatus(t).status === 'danger') catMap[catName].foraSLA++;
+    });
+
+    var catData = [['Categoria', 'Total', 'Abertos', 'Fechados', 'Fora do SLA']];
+    Object.keys(catMap).forEach(function(name) {
+        var c = catMap[name];
+        catData.push([name, c.total, c.abertos, c.fechados, c.foraSLA]);
+    });
+
+    var ws3 = XLSX.utils.aoa_to_sheet(catData);
+    ws3['!cols'] = [{ wch: 25 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, ws3, 'Por Categoria');
+
+    // === ABA 4: POR ATENDENTE ===
+    var analystMap = {};
+    tickets.forEach(function(t) {
+        var analyst = t.assignedTo ? db.getUserById(t.assignedTo) : null;
+        var aName = analyst ? analyst.name : 'Nao atribuido';
+        if (!analystMap[aName]) analystMap[aName] = { total: 0, abertos: 0, fechados: 0, foraSLA: 0 };
+        analystMap[aName].total++;
+        if (t.status === 'aberto') analystMap[aName].abertos++;
+        if (t.status === 'fechado') analystMap[aName].fechados++;
+        if (db.getSLAStatus(t).status === 'danger') analystMap[aName].foraSLA++;
+    });
+
+    var analystData = [['Atendente', 'Total', 'Abertos', 'Fechados', 'Fora do SLA']];
+    Object.keys(analystMap).forEach(function(name) {
+        var a = analystMap[name];
+        analystData.push([name, a.total, a.abertos, a.fechados, a.foraSLA]);
+    });
+
+    var ws4 = XLSX.utils.aoa_to_sheet(analystData);
+    ws4['!cols'] = [{ wch: 25 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, ws4, 'Por Atendente');
+
+    // === GERAR ARQUIVO ===
+    var fileName = 'relatorio_chamados_' + new Date().toISOString().slice(0, 10) + '.xlsx';
+    XLSX.writeFile(wb, fileName);
+    showToast('Relatorio Excel exportado!', 'success');
 }
 
 // Relatório de satisfação (só admin)
