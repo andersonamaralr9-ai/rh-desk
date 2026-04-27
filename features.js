@@ -45,29 +45,16 @@ window.handleFileSelect = function(input) {
 // ============================================
 
 // Quando atendente marca como "resolvido", inicia prazo de 3 dias
+// CORRIGIDO: resolveTicket — usar colunas reais
 async function resolveTicket(ticketId, resolutionNote) {
     var ticket = db.getTicketById(ticketId);
     if (!ticket) return;
     var now = new Date();
-    var deadline = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000); // +3 dias
+    var deadline = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
     
-    var updates = {
-        status: 'resolvido',
-        resolvedAt: now.toISOString(),
-        acceptanceDeadline: deadline.toISOString()
-    };
-    
-    // Atualizar no Supabase
-    try {
-        await supaRest.update('tickets', 'id=eq.' + ticketId, {
-            status: 'resolvido',
-            resolved_at: now.toISOString(),
-            acceptance_deadline: deadline.toISOString(),
-            updated_at: now.toISOString()
-        });
-    } catch(e) { console.error('Erro resolve ticket:', e); }
-    
-    Object.assign(ticket, updates);
+    ticket.status = 'resolvido';
+    ticket.resolvedAt = now.toISOString();
+    ticket.acceptanceDeadline = deadline.toISOString();
     ticket.updatedAt = now.toISOString();
     if (!ticket.history) ticket.history = [];
     ticket.history.push({
@@ -79,15 +66,19 @@ async function resolveTicket(ticketId, resolutionNote) {
     
     try {
         await supaRest.update('tickets', 'id=eq.' + ticketId, {
+            status: 'resolvido',
+            resolved_at: now.toISOString(),
+            acceptance_deadline: deadline.toISOString(),
+            updated_at: now.toISOString(),
             history: ticket.history
         });
-    } catch(e) {}
+    } catch(e) { console.error('Erro resolve ticket:', e); }
     
     db.saveToLocal();
     showToast('Chamado resolvido! Usuario tem 3 dias para aceitar ou reabrir.', 'success');
 }
 
-// Usuario aceita a resolução → fecha chamado e dispara pesquisa
+// CORRIGIDO: acceptResolution
 async function acceptResolution(ticketId) {
     var ticket = db.getTicketById(ticketId);
     if (!ticket) return;
@@ -115,12 +106,10 @@ async function acceptResolution(ticketId) {
     
     db.saveToLocal();
     showToast('Chamado fechado com sucesso!', 'success');
-    
-    // Mostrar pesquisa de satisfação
     showSatisfactionSurvey(ticketId);
 }
 
-// Usuario reabre o chamado
+// CORRIGIDO: reopenTicket
 async function reopenTicket(ticketId, reason) {
     var ticket = db.getTicketById(ticketId);
     if (!ticket) return;
@@ -153,7 +142,7 @@ async function reopenTicket(ticketId, reason) {
     navigateTo('ticket-detail', { id: ticketId });
 }
 
-// Auto-fechar chamados com prazo expirado (roda no init e a cada sync)
+// CORRIGIDO: autoCloseExpiredTickets
 async function autoCloseExpiredTickets() {
     var now = new Date();
     var resolved = db.data.tickets.filter(function(t) {
