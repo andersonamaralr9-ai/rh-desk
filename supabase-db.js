@@ -407,7 +407,7 @@ db.addTicketHistory = async function(ticketId, action, userId, details) {
     db.saveToLocal();
 };
 
-// === Sobrescrever db.addMessage ===
+// === Sobrescrever db.addMessage — COM UPLOAD DE ANEXOS ===
 db.addMessage = async function(messageData) {
     var maxNum = 0;
     db.data.messages.forEach(function(m) {
@@ -417,18 +417,53 @@ db.addMessage = async function(messageData) {
     var newId = 'MSG' + String(maxNum + 1).padStart(5, '0');
     var now = new Date().toISOString();
 
+    // Upload anexos do ticket para Supabase Storage
+    var uploadedAttachments = [];
+    var rawAttachments = ticketData.attachments || [];
+    for (var a = 0; a < rawAttachments.length; a++) {
+        var att = rawAttachments[a];
+        if (typeof att === 'string' || att.url) {
+            uploadedAttachments.push(att);
+            continue;
+        }
+        if (att instanceof File || (att.name && att.size)) {
+            try {
+                var filePath = 'tickets/' + newId + '/' + Date.now() + '_' + att.name;
+                var uploadResp = await fetch(
+                    SUPABASE_URL + '/storage/v1/object/attachments/' + filePath,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'apikey': SUPABASE_KEY,
+                            'Authorization': 'Bearer ' + SUPABASE_KEY
+                        },
+                        body: att
+                    }
+                );
+                if (uploadResp.ok) {
+                    var publicUrl = SUPABASE_URL + '/storage/v1/object/public/attachments/' + filePath;
+                    uploadedAttachments.push({ name: att.name, size: att.size, url: publicUrl });
+                } else {
+                    console.error('Erro upload anexo ticket:', await uploadResp.text());
+                }
+            } catch(e) { console.error('Erro upload:', e); }
+        }
+    }
+
+
     var supaMsg = {
         id: newId,
         ticket_id: messageData.ticketId,
         user_id: messageData.userId,
-        text: messageData.text,
+        text: messageData.text || '',
         type: messageData.type || 'message',
-        attachments: messageData.attachments || [],
+        attachments: uploadedAttachments,
         created_at: now
     };
 
     try {
         await supaRest.insert('messages', supaMsg);
+        console.log('Mensagem salva no Supabase:', newId);
     } catch(e) {
         console.error('Erro Supabase addMessage:', e);
     }
@@ -437,9 +472,9 @@ db.addMessage = async function(messageData) {
         id: newId,
         ticketId: messageData.ticketId,
         userId: messageData.userId,
-        text: messageData.text,
+        text: messageData.text || '',
         type: messageData.type || 'message',
-        attachments: messageData.attachments || [],
+        attachments: uploadedAttachments,
         createdAt: now
     };
 
@@ -447,6 +482,7 @@ db.addMessage = async function(messageData) {
     db.saveToLocal();
     return localMsg;
 };
+
 
 // === Funções de catálogo ===
 db.addCategory = async function(categoryData) {
