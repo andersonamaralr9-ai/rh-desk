@@ -98,30 +98,35 @@ async function loadFromSupabase() {
         // Tickets
         var tickets = await supaRest.select('tickets', 'select=*&order=created_at.desc');
         if (tickets) {
-            // Parse campos JSON se necessario
             db.data.tickets = tickets.map(function(t) {
                 if (typeof t.history === 'string') try { t.history = JSON.parse(t.history); } catch(e) { t.history = []; }
                 if (typeof t.form_data === 'string') try { t.form_data = JSON.parse(t.form_data); } catch(e) { t.form_data = {}; }
                 if (!t.history) t.history = [];
                 if (!t.form_data) t.form_data = {};
-                // Mapear snake_case para camelCase que o app usa
+                // Mapear snake_case para camelCase - manter AMBOS createdBy e userId
                 return {
                     id: t.id,
+                    createdBy: t.user_id,
                     userId: t.user_id,
                     categoryId: t.category_id,
                     serviceId: t.service_id,
+                    subject: t.title,
                     title: t.title,
                     description: t.description,
                     priority: t.priority,
                     status: t.status,
                     assignedTo: t.assigned_to,
                     slaId: t.sla_id,
+                    slaDeadline: t.sla_deadline || null,
                     createdAt: t.created_at,
                     updatedAt: t.updated_at,
                     closedAt: t.closed_at,
                     formData: t.form_data,
                     history: t.history,
-                    attachments: t.attachments || []
+                    attachments: t.attachments || [],
+                    resolvedAt: t.resolved_at || null,
+                    acceptanceDeadline: t.acceptance_deadline || null,
+                    satisfactionSent: t.satisfaction_sent || false
                 };
             });
             console.log('Supabase tickets:', db.data.tickets.length);
@@ -274,20 +279,28 @@ db.addTicket = async function(ticketData) {
     var newId = 'CHM-' + year + '-' + String(maxNum + 1).padStart(5, '0');
 
     var now = new Date().toISOString();
+    
+    // Compatibilidade: aceitar tanto createdBy quanto userId
+    var theUserId = ticketData.createdBy || ticketData.userId || (currentUser ? currentUser.id : '');
+    
+    var sla = db.getSLAById(ticketData.slaId);
+    var slaDeadline = sla ? db.calculateSLADeadline(now, sla) : null;
+
     var historyEntry = [{
-        date: now,
         action: 'Chamado aberto',
-        userId: ticketData.userId,
-        details: 'Chamado criado'
+        by: theUserId,
+        at: now,
+        details: 'Chamado criado no sistema'
     }];
 
+    // Objeto para Supabase (snake_case)
     var supaTicket = {
         id: newId,
-        user_id: ticketData.userId,
+        user_id: theUserId,
         category_id: ticketData.categoryId,
         service_id: ticketData.serviceId,
-        title: ticketData.title,
-        description: ticketData.description,
+        title: ticketData.subject || ticketData.title || '',
+        description: ticketData.description || '',
         priority: ticketData.priority || 'media',
         status: 'aberto',
         assigned_to: ticketData.assignedTo || null,
@@ -302,21 +315,28 @@ db.addTicket = async function(ticketData) {
 
     try {
         await supaRest.insert('tickets', supaTicket);
+        console.log('Ticket criado no Supabase:', newId);
     } catch(e) {
         console.error('Erro Supabase addTicket:', e);
     }
 
+    // Objeto local (camelCase) — manter AMBOS createdBy e userId
     var localTicket = {
         id: newId,
-        userId: ticketData.userId,
+        createdBy: theUserId,
+        userId: theUserId,
         categoryId: ticketData.categoryId,
         serviceId: ticketData.serviceId,
-        title: ticketData.title,
-        description: ticketData.description,
+        subject: ticketData.subject || ticketData.title || '',
+        title: ticketData.subject || ticketData.title || '',
+        description: ticketData.description || '',
         priority: ticketData.priority || 'media',
         status: 'aberto',
         assignedTo: ticketData.assignedTo || null,
         slaId: ticketData.slaId || 'SLA001',
+        slaDeadline: slaDeadline,
+        slaHours: sla ? sla.hours : null,
+        slaCountWeekends: sla ? sla.countWeekends : false,
         createdAt: now,
         updatedAt: now,
         closedAt: null,
@@ -327,9 +347,9 @@ db.addTicket = async function(ticketData) {
 
     db.data.tickets.push(localTicket);
     db.saveToLocal();
-    console.log('Ticket criado:', newId);
     return localTicket;
 };
+
 
 // === Sobrescrever db.updateTicket ===
 db.updateTicket = async function(ticketId, updates) {
