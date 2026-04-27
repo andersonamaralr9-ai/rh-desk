@@ -45,8 +45,10 @@
 
         <!-- MAIN APP -->
         <div id="main-app" class="screen">
-            <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="toggleSidebar()" style="display:none;"><i class="fas fa-bars"></i></button>
-<div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>
+            <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="toggleSidebar()" style="display:none;">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>
             <aside id="sidebar">
                 <div class="sidebar-header">
                     <i class="fas fa-headset"></i>
@@ -85,8 +87,8 @@
     <!-- TOAST NOTIFICATIONS -->
     <div id="toast-container"></div>
 
-    <!-- SCRIPTS NA ORDEM CORRETA -->
-       <script src="app-bundle.js"></script>
+    <!-- SCRIPTS -->
+    <script src="app-bundle.js"></script>
     <script src="supabase-db.js"></script>
     <script src="import-users.js"></script>
     <script>
@@ -104,24 +106,25 @@
     });
 
     (async function() {
-        console.log('=== INICIO RH Desk + Supabase ===');
+        console.log('=== RH DESK INIT (Supabase) ===');
 
-        // 1. Carregar dados do Supabase
-        var loaded = false;
+        // 1. Tentar carregar do Supabase
+        var supaOk = false;
         try {
-            loaded = await db.loadFromSupabase();
-            if (loaded) console.log('Dados carregados do Supabase');
+            supaOk = await loadFromSupabase();
         } catch(e) {
-            console.warn('Supabase erro, tentando localStorage:', e);
+            console.warn('Supabase indisponivel:', e);
         }
 
-        // 2. Fallback para localStorage
-        if (!loaded) {
+        // 2. Se Supabase falhou, tentar localStorage
+        if (!supaOk) {
+            console.log('Fallback para localStorage...');
             db.loadFromLocal();
         }
 
-        // 3. Garantir dados padrao
+        // 3. Se vazio, criar dados padrão localmente
         if (!db.data.users || db.data.users.length === 0) {
+            console.log('Criando dados padrao...');
             db.createDefaultData();
             db.saveToLocal();
         }
@@ -134,18 +137,23 @@
             db.saveToLocal();
         }
 
-        console.log('Users:', db.data.users.length, '| Tickets:', db.data.tickets.length);
-        document.getElementById('loading-screen').style.display = 'none';
+        console.log('PRONTO - Users:', db.data.users.length,
+                     '| Tickets:', db.data.tickets.length,
+                     '| Categorias:', db.data.catalog.categories ? db.data.catalog.categories.length : 0);
 
+        // 4. Esconder loading e mostrar tela
+        document.getElementById('loading-screen').style.display = 'none';
         if (checkSession()) {
             showMainApp();
         } else {
             showLoginScreen();
         }
 
-        // Auto-sync a cada 2 minutos
+        // 5. Auto-sync do Supabase a cada 2 minutos
         setInterval(async function() {
-            try { await db.loadFromSupabase(); } catch(e) {}
+            try {
+                await loadFromSupabase();
+            } catch(e) {}
         }, 2 * 60 * 1000);
     })();
     </script>
