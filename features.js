@@ -337,8 +337,10 @@ function getFilteredTickets() {
     if (status) tickets = tickets.filter(function(t) { return t.status === status; });
     if (analyst) tickets = tickets.filter(function(t) { return t.assignedTo === analyst; });
     if (category) tickets = tickets.filter(function(t) { return t.categoryId === category; });
-    if (dateFrom) tickets = tickets.filter(function(t) { return t.createdAt >= dateFrom; });
-    if (dateTo) tickets = tickets.filter(function(t) { return t.createdAt <= dateTo + 'T23:59:59'; });
+    var isoFrom = parseBRDate(dateFrom);
+var isoTo = parseBRDate(dateTo);
+if (isoFrom) tickets = tickets.filter(function(t) { return t.createdAt >= isoFrom; });
+if (isoTo) tickets = tickets.filter(function(t) { return t.createdAt <= isoTo + 'T23:59:59'; });
     if (slaFilter) {
         tickets = tickets.filter(function(t) {
             var slaStatus = db.getSLAStatus(t);
