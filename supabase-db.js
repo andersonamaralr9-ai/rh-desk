@@ -641,4 +641,23 @@ async function reloadFromSupabase() {
     }
 }
 
+// Dentro de loadFromSupabase, substituir o bloco de Users por:
+var users = await supaRest.select('users', 'select=*&order=created_at.asc');
+if (users && users.length > 0) {
+    db.data.users = users.map(function(u) {
+        return {
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            password: u.password,
+            role: u.role,
+            active: u.active,
+            createdAt: u.created_at,
+            created_at: u.created_at,
+            allowedCategories: u.allowed_categories || []
+        };
+    });
+    console.log('Supabase users:', users.length);
+}
+
 console.log('supabase-db.js v3 carregado (created_by/subject)');
