@@ -143,6 +143,8 @@
                      '| Categorias:', db.data.catalog.categories ? db.data.catalog.categories.length : 0);
 
         // 4. Esconder loading e mostrar tela
+                // Auto-fechar chamados com prazo de aceite expirado
+        try { await autoCloseExpiredTickets(); } catch(e) {}
         document.getElementById('loading-screen').style.display = 'none';
         if (checkSession()) {
             showMainApp();
