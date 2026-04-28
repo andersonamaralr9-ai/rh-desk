@@ -1208,20 +1208,20 @@ var _patchUsersInterval = setInterval(function() {
 }, 2000);
 
 // ============================================
+// ============================================
 // 11. RECARREGAR MENSAGENS AO ABRIR TICKET
 // ============================================
-const _origRenderTicketDetail = typeof renderTicketDetail === 'function' ? renderTicketDetail : null;
+if (typeof renderTicketDetail === 'function' && !window._ticketDetailPatched) {
+    window._ticketDetailPatched = true;
+    const _origRenderTicketDetail = renderTicketDetail;
 
-if (_origRenderTicketDetail) {
     window.renderTicketDetail = async function(ticketId) {
         // Recarrega mensagens do Supabase antes de exibir
         try {
-            const freshMsgs = await supaRest.select('messages', '*', 
+            const freshMsgs = await supaRest.select('messages', '*',
                 `ticket_id=eq.${ticketId}&order=created_at.asc`);
-            if (freshMsgs) {
-                // Remove mensagens antigas deste ticket do array local
+            if (freshMsgs && freshMsgs.length > 0) {
                 db.messages = (db.messages || []).filter(m => m.ticketId !== ticketId);
-                // Adiciona as frescas
                 freshMsgs.forEach(m => {
                     db.messages.push({
                         id: m.id,
@@ -1238,13 +1238,9 @@ if (_origRenderTicketDetail) {
         } catch(e) {
             console.error('Erro ao recarregar mensagens:', e);
         }
-
-        // Chama o render original
         _origRenderTicketDetail.apply(this, arguments);
     };
 }
-
-console.log('✅ Seção 11 - Recarregar mensagens ao abrir ticket carregada');
 
 
 console.log('features.js carregado');
