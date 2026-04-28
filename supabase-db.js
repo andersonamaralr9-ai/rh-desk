@@ -1,703 +1,717 @@
 // ============================================
-// SUPABASE DATABASE LAYER — v3 CORRIGIDO
-// Colunas: created_by (não user_id), subject (não title)
+// SUPABASE-DB.JS v4 — Versão Robusta
 // ============================================
 
-var SUPABASE_URL = 'https://fnihosrvwitlnnlcarpf.supabase.co';
-var SUPABASE_KEY = 'sb_publishable_BackMGGYNFGhIv4lqydCnQ_8izBUueF';
+const SUPABASE_URL = 'https://fnihosrvwitlnnlcarpf.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_BackMGGYNFGhIv4lqydCnQ_8izBUueF';
 
-// === REST helper ===
-var supaRest = {
-    headers: function() {
-        return {
-            'apikey': SUPABASE_KEY,
-            'Authorization': 'Bearer ' + SUPABASE_KEY,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=representation'
-        };
+const supaRest = {
+    headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
     },
-    select: async function(table, query) {
-        var url = SUPABASE_URL + '/rest/v1/' + table;
-        if (query) url += '?' + query;
-        var resp = await fetch(url, { headers: this.headers() });
-        if (!resp.ok) {
-            var err = await resp.text();
-            throw new Error('Supabase SELECT ' + table + ': ' + resp.status + ' ' + err);
+
+    async select(table, columns = '*', filter = '') {
+        try {
+            const url = `${SUPABASE_URL}/rest/v1/${table}?select=${columns}${filter ? '&' + filter : ''}`;
+            const res = await fetch(url, { headers: this.headers });
+            if (!res.ok) {
+                console.error(`SELECT ${table} falhou:`, res.status, await res.text());
+                return [];
+            }
+            return await res.json();
+        } catch(e) {
+            console.error(`SELECT ${table} erro:`, e);
+            return [];
         }
-        return await resp.json();
     },
-    insert: async function(table, data) {
-        var resp = await fetch(SUPABASE_URL + '/rest/v1/' + table, {
-            method: 'POST',
-            headers: this.headers(),
-            body: JSON.stringify(data)
-        });
-        if (!resp.ok) {
-            var err = await resp.text();
-            throw new Error('Supabase INSERT ' + table + ': ' + resp.status + ' ' + err);
+
+    async insert(table, data) {
+        try {
+            const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+                method: 'POST',
+                headers: this.headers,
+                body: JSON.stringify(data)
+            });
+            if (!res.ok) {
+                const errText = await res.text();
+                console.error(`INSERT ${table} falhou:`, res.status, errText);
+                return null;
+            }
+            const result = await res.json();
+            return result[0] || result;
+        } catch(e) {
+            console.error(`INSERT ${table} erro:`, e);
+            return null;
         }
-        return await resp.json();
     },
-    update: async function(table, matchQuery, data) {
-        var resp = await fetch(SUPABASE_URL + '/rest/v1/' + table + '?' + matchQuery, {
-            method: 'PATCH',
-            headers: this.headers(),
-            body: JSON.stringify(data)
-        });
-        if (!resp.ok) {
-            var err = await resp.text();
-            throw new Error('Supabase UPDATE ' + table + ': ' + resp.status + ' ' + err);
+
+    async update(table, id, data) {
+        try {
+            const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, {
+                method: 'PATCH',
+                headers: this.headers,
+                body: JSON.stringify(data)
+            });
+            if (!res.ok) {
+                const errText = await res.text();
+                console.error(`UPDATE ${table} ${id} falhou:`, res.status, errText);
+                return null;
+            }
+            const result = await res.json();
+            return result[0] || result;
+        } catch(e) {
+            console.error(`UPDATE ${table} ${id} erro:`, e);
+            return null;
         }
-        return await resp.json();
     },
-    remove: async function(table, matchQuery) {
-        var resp = await fetch(SUPABASE_URL + '/rest/v1/' + table + '?' + matchQuery, {
-            method: 'DELETE',
-            headers: this.headers()
-        });
-        if (!resp.ok) {
-            var err = await resp.text();
-            throw new Error('Supabase DELETE ' + table + ': ' + resp.status + ' ' + err);
+
+    async remove(table, id) {
+        try {
+            const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, {
+                method: 'DELETE',
+                headers: this.headers
+            });
+            if (!res.ok) {
+                console.error(`DELETE ${table} ${id} falhou:`, res.status);
+                return false;
+            }
+            return true;
+        } catch(e) {
+            console.error(`DELETE ${table} ${id} erro:`, e);
+            return false;
         }
-        return true;
     },
-    upsert: async function(table, data, onConflict) {
-        var h = this.headers();
-        h['Prefer'] = 'return=representation,resolution=merge-duplicates';
-        var url = SUPABASE_URL + '/rest/v1/' + table;
-        if (onConflict) url += '?on_conflict=' + onConflict;
-        var resp = await fetch(url, {
-            method: 'POST',
-            headers: h,
-            body: JSON.stringify(data)
-        });
-        if (!resp.ok) {
-            var err = await resp.text();
-            throw new Error('Supabase UPSERT ' + table + ': ' + resp.status + ' ' + err);
+
+    async upsert(table, data) {
+        try {
+            const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+                method: 'POST',
+                headers: { ...this.headers, 'Prefer': 'return=representation,resolution=merge-duplicates' },
+                body: JSON.stringify(data)
+            });
+            if (!res.ok) {
+                console.error(`UPSERT ${table} falhou:`, res.status, await res.text());
+                return null;
+            }
+            return await res.json();
+        } catch(e) {
+            console.error(`UPSERT ${table} erro:`, e);
+            return null;
         }
-        return await resp.json();
     }
 };
 
-// === Carregar TUDO do Supabase para db.data ===
+// ============================================
+// LOAD FROM SUPABASE
+// ============================================
 async function loadFromSupabase() {
-    console.log('Carregando dados do Supabase...');
+    console.log('🔄 Carregando dados do Supabase...');
+    let loaded = { users: false, tickets: false, messages: false, catalog: false, sla: false };
+
+    // === USERS ===
     try {
-        // Users
-        var users = await supaRest.select('users', 'select=*&order=created_at.asc');
+        const users = await supaRest.select('users', '*');
         if (users && users.length > 0) {
-            db.data.users = users.map(function(u) {
-                return {
-                    id: u.id,
-                    name: u.name,
-                    email: u.email,
-                    password: u.password,
-                    role: u.role,
-                    active: u.active,
-                    createdAt: u.created_at,
-                    created_at: u.created_at
-                };
-            });
-            console.log('Supabase users:', users.length);
+            db.users = users.map(u => ({
+                id: u.id,
+                name: u.name,
+                email: u.email,
+                password: u.password,
+                role: u.role,
+                active: u.active,
+                createdAt: u.created_at,
+                allowedCategories: u.allowed_categories || []
+            }));
+            loaded.users = true;
+            console.log(`✅ ${users.length} usuários carregados`);
+        } else {
+            console.warn('⚠️ Nenhum usuário no Supabase, mantendo localStorage');
         }
-
-        // Tickets — colunas reais: created_by, subject (NÃO user_id, title)
-        var tickets = await supaRest.select('tickets', 'select=*&order=created_at.desc');
-        if (tickets) {
-            db.data.tickets = tickets.map(function(t) {
-                if (typeof t.history === 'string') try { t.history = JSON.parse(t.history); } catch(e) { t.history = []; }
-                if (typeof t.form_data === 'string') try { t.form_data = JSON.parse(t.form_data); } catch(e) { t.form_data = {}; }
-                if (!t.history) t.history = [];
-                if (!t.form_data) t.form_data = {};
-                return {
-                    id: t.id,
-                    createdBy: t.created_by,
-                    userId: t.created_by,
-                    categoryId: t.category_id,
-                    serviceId: t.service_id,
-                    subject: t.subject,
-                    title: t.subject,
-                    description: t.description,
-                    priority: t.priority,
-                    status: t.status,
-                    assignedTo: t.assigned_to,
-                    slaId: t.sla_id,
-                    slaDeadline: t.sla_deadline || null,
-                    createdAt: t.created_at,
-                    updatedAt: t.updated_at,
-                    closedAt: t.closed_at || null,
-                    formData: t.form_data,
-                    history: t.history,
-                    attachments: t.attachments || [],
-                    resolvedAt: t.resolved_at || null,
-                    acceptanceDeadline: t.acceptance_deadline || null,
-                    satisfactionSent: t.satisfaction_sent || false
-                };
-            });
-            console.log('Supabase tickets:', db.data.tickets.length);
-        }
-
-        // === MESSAGES ===
-try {
-    const messages = await supaRest.select('messages', '*', 'order=created_at.asc');
-    if (messages && messages.length > 0) {
-        db.messages = messages.map(m => ({
-            id: m.id,
-            ticketId: m.ticket_id,
-            userId: m.user_id,
-            type: m.type,
-            text: m.text,
-            attachment: m.attachment || null,
-            attachments: m.attachments || [],
-            createdAt: m.created_at
-        }));
-        console.log(`✅ ${messages.length} mensagens carregadas do Supabase`);
+    } catch(e) {
+        console.error('❌ Erro ao carregar usuários:', e);
     }
-} catch(e) {
-    console.error('Erro ao carregar mensagens:', e);
-}
 
+    // === TICKETS ===
+    try {
+        const tickets = await supaRest.select('tickets', '*', 'order=created_at.desc');
+        if (tickets && tickets.length > 0) {
+            db.tickets = tickets.map(t => ({
+                id: t.id,
+                subject: t.subject,
+                title: t.subject, // alias para compatibilidade
+                description: t.description,
+                priority: t.priority,
+                status: t.status,
+                categoryId: t.category_id,
+                serviceId: t.service_id,
+                serviceName: t.service_name,
+                createdBy: t.created_by,
+                userId: t.created_by, // alias para compatibilidade
+                assignedTo: t.assigned_to,
+                slaId: t.sla_id,
+                slaDeadline: t.sla_deadline,
+                slaHours: t.sla_hours,
+                slaCountWeekends: t.sla_count_weekends,
+                formData: t.form_data,
+                attachments: t.attachments || [],
+                history: t.history || [],
+                createdAt: t.created_at,
+                updatedAt: t.updated_at,
+                resolvedAt: t.resolved_at,
+                acceptanceDeadline: t.acceptance_deadline,
+                satisfactionSent: t.satisfaction_sent || false,
+                closedAt: t.closed_at
+            }));
+            loaded.tickets = true;
+            console.log(`✅ ${tickets.length} tickets carregados`);
+        } else {
+            console.log('ℹ️ Nenhum ticket no Supabase');
+        }
+    } catch(e) {
+        console.error('❌ Erro ao carregar tickets:', e);
+    }
 
-        // Catalog
-        var catalog = await supaRest.select('catalog', 'select=*');
+    // === MESSAGES ===
+    try {
+        const messages = await supaRest.select('messages', '*', 'order=created_at.asc');
+        if (messages && messages.length > 0) {
+            db.messages = messages.map(m => ({
+                id: m.id,
+                ticketId: m.ticket_id,
+                userId: m.user_id,
+                type: m.type,
+                text: m.text,
+                attachment: m.attachment || null,
+                attachments: m.attachments || [],
+                createdAt: m.created_at
+            }));
+            loaded.messages = true;
+            console.log(`✅ ${messages.length} mensagens carregadas`);
+        } else {
+            console.log('ℹ️ Nenhuma mensagem no Supabase');
+        }
+    } catch(e) {
+        console.error('❌ Erro ao carregar mensagens:', e);
+    }
+
+    // === CATALOG ===
+    try {
+        const catalog = await supaRest.select('catalog', '*');
         if (catalog && catalog.length > 0 && catalog[0].data) {
-            db.data.catalog = catalog[0].data;
-            console.log('Supabase catalog categories:', db.data.catalog.categories ? db.data.catalog.categories.length : 0);
+            const data = catalog[0].data;
+            if (data.categories) {
+                db.catalog = data;
+            }
+            loaded.catalog = true;
+            console.log(`✅ Catálogo carregado (${data.categories ? data.categories.length : 0} categorias)`);
         }
-
-        // SLA
-        var sla = await supaRest.select('sla', 'select=*&order=hours.asc');
-        if (sla && sla.length > 0) {
-            db.data.sla = sla.map(function(s) {
-                return {
-                    id: s.id,
-                    name: s.name,
-                    hours: s.hours,
-                    countWeekends: s.count_weekends,
-                    active: s.active
-                };
-            });
-            console.log('Supabase sla:', db.data.sla.length);
-        }
-
-        db.saveToLocal();
-        return true;
     } catch(e) {
-        console.error('Erro ao carregar do Supabase:', e);
-        return false;
+        console.error('❌ Erro ao carregar catálogo:', e);
     }
+
+    // === SLA ===
+    try {
+        const sla = await supaRest.select('sla', '*');
+        if (sla && sla.length > 0) {
+            db.sla = sla.map(s => ({
+                id: s.id,
+                name: s.name,
+                hours: s.hours,
+                countWeekends: s.count_weekends,
+                active: s.active
+            }));
+            loaded.sla = true;
+            console.log(`✅ ${sla.length} SLAs carregados`);
+        }
+    } catch(e) {
+        console.error('❌ Erro ao carregar SLA:', e);
+    }
+
+    // Salva no localStorage como backup
+    try {
+        if (loaded.users) localStorage.setItem('rh_desk_users', JSON.stringify(db.users));
+        if (loaded.tickets) localStorage.setItem('rh_desk_tickets', JSON.stringify(db.tickets));
+        if (loaded.messages) localStorage.setItem('rh_desk_messages', JSON.stringify(db.messages));
+        if (loaded.catalog) localStorage.setItem('rh_desk_catalog', JSON.stringify(db.catalog));
+        if (loaded.sla) localStorage.setItem('rh_desk_sla', JSON.stringify(db.sla));
+    } catch(e) {
+        console.error('Erro ao salvar localStorage:', e);
+    }
+
+    console.log('✅ loadFromSupabase concluído:', loaded);
+    return loaded;
 }
 
-// === Sobrescrever db.addUser ===
-db.addUser = async function(userData) {
-    var maxNum = 0;
-    db.data.users.forEach(function(u) {
-        var num = parseInt(u.id.replace('USR', ''));
-        if (num > maxNum) maxNum = num;
-    });
-    var newId = 'USR' + String(maxNum + 1).padStart(3, '0');
-    var now = new Date().toISOString();
-
-    var newUser = {
-        id: newId,
-        name: userData.name,
-        email: userData.email,
-        password: userData.password,
-        role: userData.role || 'user',
-        active: true,
-        created_at: now
+// ============================================
+// OVERRIDE: db.getMessages
+// ============================================
+if (typeof db !== 'undefined') {
+    db.getMessages = function(ticketId) {
+        return (db.messages || []).filter(m => m.ticketId === ticketId);
     };
+}
 
-    try {
-        await supaRest.insert('users', newUser);
-        console.log('Usuario criado no Supabase:', newId);
-    } catch(e) {
-        console.error('Erro Supabase addUser:', e);
-    }
+// ============================================
+// OVERRIDE: db.addUser
+// ============================================
+if (typeof db !== 'undefined') {
+    const _origAddUser = db.addUser ? db.addUser.bind(db) : null;
+    db.addUser = async function(user) {
+        // Adiciona localmente
+        if (_origAddUser) _origAddUser(user);
+        else db.users.push(user);
 
-    var localUser = {
-        id: newId,
-        name: userData.name,
-        email: userData.email,
-        password: userData.password,
-        role: userData.role || 'user',
-        active: true,
-        createdAt: now,
-        created_at: now
+        // Salva no Supabase
+        try {
+            await supaRest.insert('users', {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                password: user.password,
+                role: user.role,
+                active: user.active !== false,
+                created_at: user.createdAt || new Date().toISOString(),
+                allowed_categories: user.allowedCategories || []
+            });
+            console.log(`✅ Usuário ${user.id} salvo no Supabase`);
+        } catch(e) {
+            console.error(`❌ Erro ao salvar usuário ${user.id}:`, e);
+        }
+
+        localStorage.setItem('rh_desk_users', JSON.stringify(db.users));
     };
-    db.data.users.push(localUser);
-    db.saveToLocal();
-    return localUser;
-};
+}
 
-// === Sobrescrever db.updateUser ===
-db.updateUser = async function(userId, updates) {
-    var supaUpdates = {};
-    if (updates.name !== undefined) supaUpdates.name = updates.name;
-    if (updates.email !== undefined) supaUpdates.email = updates.email;
-    if (updates.password !== undefined) supaUpdates.password = updates.password;
-    if (updates.role !== undefined) supaUpdates.role = updates.role;
-    if (updates.active !== undefined) supaUpdates.active = updates.active;
+// ============================================
+// OVERRIDE: db.updateUser
+// ============================================
+if (typeof db !== 'undefined') {
+    db.updateUser = async function(userId, updates) {
+        const user = db.users.find(u => u.id === userId);
+        if (!user) return;
 
-    try {
-        await supaRest.update('users', 'id=eq.' + userId, supaUpdates);
-    } catch(e) {
-        console.error('Erro Supabase updateUser:', e);
-    }
-
-    var user = db.data.users.find(function(u) { return u.id === userId; });
-    if (user) {
         Object.assign(user, updates);
-        db.saveToLocal();
-    }
-    return user;
-};
 
-// === Sobrescrever db.deleteUser ===
-db.deleteUser = async function(userId) {
-    try {
-        await supaRest.remove('users', 'id=eq.' + userId);
-    } catch(e) {
-        console.error('Erro Supabase deleteUser:', e);
-    }
-    db.data.users = db.data.users.filter(function(u) { return u.id !== userId; });
-    db.saveToLocal();
-};
+        // Monta objeto para Supabase (camelCase → snake_case)
+        const supaUpdates = {};
+        if (updates.name !== undefined) supaUpdates.name = updates.name;
+        if (updates.email !== undefined) supaUpdates.email = updates.email;
+        if (updates.password !== undefined) supaUpdates.password = updates.password;
+        if (updates.role !== undefined) supaUpdates.role = updates.role;
+        if (updates.active !== undefined) supaUpdates.active = updates.active;
+        if (updates.allowedCategories !== undefined) supaUpdates.allowed_categories = updates.allowedCategories;
 
-// === Sobrescrever db.addTicket ===
-// CORRIGIDO: usa created_by e subject (nomes reais das colunas)
-db.addTicket = async function(ticketData) {
-    var year = new Date().getFullYear();
-    var maxNum = 0;
-    db.data.tickets.forEach(function(t) {
-        var parts = t.id.split('-');
-        if (parts.length === 3) {
-            var num = parseInt(parts[2]);
-            if (num > maxNum) maxNum = num;
+        try {
+            await supaRest.update('users', userId, supaUpdates);
+            console.log(`✅ Usuário ${userId} atualizado no Supabase`);
+        } catch(e) {
+            console.error(`❌ Erro ao atualizar usuário ${userId}:`, e);
         }
-    });
-    var newId = 'CHM-' + year + '-' + String(maxNum + 1).padStart(5, '0');
-    var now = new Date().toISOString();
 
-    // Compatibilidade: aceitar tanto createdBy quanto userId
-    var theUserId = ticketData.createdBy || ticketData.userId || (currentUser ? currentUser.id : '');
-    var theSubject = ticketData.subject || ticketData.title || '';
-
-    var sla = db.getSLAById(ticketData.slaId);
-    var slaDeadline = sla ? db.calculateSLADeadline(now, sla) : null;
-
-    var historyEntry = [{
-        action: 'Chamado aberto',
-        by: theUserId,
-        at: now,
-        details: 'Chamado criado no sistema'
-    }];
-
-    // Objeto para Supabase — COLUNAS REAIS: created_by, subject
-    var supaTicket = {
-        id: newId,
-        created_by: theUserId,
-        category_id: ticketData.categoryId,
-        service_id: ticketData.serviceId,
-        subject: theSubject,
-        description: ticketData.description || '',
-        priority: ticketData.priority || 'media',
-        status: 'aberto',
-        assigned_to: ticketData.assignedTo || null,
-        sla_id: ticketData.slaId || 'SLA001',
-        sla_deadline: slaDeadline,
-        created_at: now,
-        updated_at: now,
-        closed_at: null,
-        form_data: ticketData.formData || {},
-        history: historyEntry,
-        attachments: ticketData.attachments || []
+        localStorage.setItem('rh_desk_users', JSON.stringify(db.users));
     };
+}
 
-    try {
-        await supaRest.insert('tickets', supaTicket);
-        console.log('Ticket criado no Supabase:', newId);
-    } catch(e) {
-        console.error('ERRO Supabase addTicket:', e);
-        showToast('Erro ao salvar chamado no servidor: ' + e.message, 'error');
-    }
+// ============================================
+// OVERRIDE: db.deleteUser
+// ============================================
+if (typeof db !== 'undefined') {
+    db.deleteUser = async function(userId) {
+        db.users = db.users.filter(u => u.id !== userId);
 
-    // Objeto local (camelCase) - manter AMBOS createdBy e userId
-    var localTicket = {
-        id: newId,
-        createdBy: theUserId,
-        userId: theUserId,
-        categoryId: ticketData.categoryId,
-        serviceId: ticketData.serviceId,
-        subject: theSubject,
-        title: theSubject,
-        description: ticketData.description || '',
-        priority: ticketData.priority || 'media',
-        status: 'aberto',
-        assignedTo: ticketData.assignedTo || null,
-        slaId: ticketData.slaId || 'SLA001',
-        slaDeadline: slaDeadline,
-        slaHours: sla ? sla.hours : null,
-        slaCountWeekends: sla ? sla.countWeekends : false,
-        createdAt: now,
-        updatedAt: now,
-        closedAt: null,
-        formData: ticketData.formData || {},
-        history: historyEntry,
-        attachments: ticketData.attachments || []
-    };
-
-    db.data.tickets.push(localTicket);
-    db.saveToLocal();
-    return localTicket;
-};
-
-// === Sobrescrever db.updateTicket ===
-// CORRIGIDO: usa created_by, subject, closed_at
-db.updateTicket = async function(ticketId, updates) {
-    var ticket = db.data.tickets.find(function(t) { return t.id === ticketId; });
-    if (!ticket) return null;
-
-    Object.assign(ticket, updates);
-    ticket.updatedAt = new Date().toISOString();
-
-    // Mapear camelCase → snake_case para Supabase
-    var supaUpdates = { updated_at: ticket.updatedAt };
-    if (updates.status !== undefined) supaUpdates.status = updates.status;
-    if (updates.priority !== undefined) supaUpdates.priority = updates.priority;
-    if (updates.assignedTo !== undefined) supaUpdates.assigned_to = updates.assignedTo;
-    if (updates.closedAt !== undefined) supaUpdates.closed_at = updates.closedAt;
-    if (updates.history !== undefined) supaUpdates.history = updates.history;
-    if (updates.description !== undefined) supaUpdates.description = updates.description;
-    if (updates.subject !== undefined) supaUpdates.subject = updates.subject;
-    if (updates.resolvedAt !== undefined) supaUpdates.resolved_at = updates.resolvedAt;
-    if (updates.acceptanceDeadline !== undefined) supaUpdates.acceptance_deadline = updates.acceptanceDeadline;
-    if (updates.satisfactionSent !== undefined) supaUpdates.satisfaction_sent = updates.satisfactionSent;
-
-    try {
-        await supaRest.update('tickets', 'id=eq.' + ticketId, supaUpdates);
-    } catch(e) {
-        console.error('Erro Supabase updateTicket:', e);
-    }
-
-    db.saveToLocal();
-    return ticket;
-};
-
-// === Adicionar historico ao ticket ===
-db.addTicketHistory = async function(ticketId, action, userId, details) {
-    var ticket = db.data.tickets.find(function(t) { return t.id === ticketId; });
-    if (!ticket) return;
-
-    if (!ticket.history) ticket.history = [];
-    var entry = {
-        action: action,
-        by: userId,
-        at: new Date().toISOString(),
-        details: details || ''
-    };
-    ticket.history.push(entry);
-    ticket.updatedAt = new Date().toISOString();
-
-    try {
-        await supaRest.update('tickets', 'id=eq.' + ticketId, {
-            history: ticket.history,
-            updated_at: ticket.updatedAt
-        });
-    } catch(e) {
-        console.error('Erro Supabase addTicketHistory:', e);
-    }
-
-    db.saveToLocal();
-};
-
-// === Sobrescrever db.addMessage — COM UPLOAD DE ANEXOS ===
-db.addMessage = async function(messageData) {
-    var maxNum = 0;
-    db.data.messages.forEach(function(m) {
-        var num = parseInt(m.id.replace('MSG', ''));
-        if (!isNaN(num) && num > maxNum) maxNum = num;
-    });
-    var newId = 'MSG' + String(maxNum + 1).padStart(5, '0');
-    var now = new Date().toISOString();
-
-    // Upload anexos do ticket para Supabase Storage
-    var uploadedAttachments = [];
-    var rawAttachments = ticketData.attachments || [];
-    for (var a = 0; a < rawAttachments.length; a++) {
-        var att = rawAttachments[a];
-        if (typeof att === 'string' || att.url) {
-            uploadedAttachments.push(att);
-            continue;
+        try {
+            await supaRest.remove('users', userId);
+            console.log(`✅ Usuário ${userId} removido do Supabase`);
+        } catch(e) {
+            console.error(`❌ Erro ao remover usuário ${userId}:`, e);
         }
-        if (att instanceof File || (att.name && att.size)) {
+
+        localStorage.setItem('rh_desk_users', JSON.stringify(db.users));
+    };
+}
+
+// ============================================
+// OVERRIDE: db.addTicket
+// ============================================
+if (typeof db !== 'undefined') {
+    db.addTicket = async function(ticket) {
+        // Adiciona localmente com aliases
+        const localTicket = {
+            ...ticket,
+            title: ticket.subject || ticket.title,
+            subject: ticket.subject || ticket.title,
+            userId: ticket.createdBy || ticket.userId,
+            createdBy: ticket.createdBy || ticket.userId
+        };
+        db.tickets.push(localTicket);
+
+        // Monta para Supabase
+        const supaTicket = {
+            id: ticket.id,
+            subject: ticket.subject || ticket.title,
+            description: ticket.description,
+            priority: ticket.priority || 'media',
+            status: ticket.status || 'aberto',
+            category_id: ticket.categoryId,
+            service_id: ticket.serviceId,
+            service_name: ticket.serviceName || null,
+            created_by: ticket.createdBy || ticket.userId,
+            assigned_to: ticket.assignedTo || null,
+            sla_id: ticket.slaId || null,
+            sla_deadline: ticket.slaDeadline || null,
+            sla_hours: ticket.slaHours || null,
+            sla_count_weekends: ticket.slaCountWeekends || false,
+            form_data: ticket.formData || {},
+            attachments: ticket.attachments || [],
+            history: ticket.history || [],
+            created_at: ticket.createdAt || new Date().toISOString(),
+            updated_at: ticket.updatedAt || new Date().toISOString(),
+            resolved_at: ticket.resolvedAt || null,
+            acceptance_deadline: ticket.acceptanceDeadline || null,
+            satisfaction_sent: ticket.satisfactionSent || false,
+            closed_at: ticket.closedAt || null
+        };
+
+        try {
+            await supaRest.insert('tickets', supaTicket);
+            console.log(`✅ Ticket ${ticket.id} salvo no Supabase`);
+        } catch(e) {
+            console.error(`❌ Erro ao salvar ticket ${ticket.id}:`, e);
+        }
+
+        localStorage.setItem('rh_desk_tickets', JSON.stringify(db.tickets));
+        return localTicket;
+    };
+}
+
+// ============================================
+// OVERRIDE: db.updateTicket
+// ============================================
+if (typeof db !== 'undefined') {
+    db.updateTicket = async function(ticketId, updates) {
+        const ticket = db.tickets.find(t => t.id === ticketId);
+        if (!ticket) return;
+
+        Object.assign(ticket, updates);
+        // Mantém aliases sincronizados
+        if (updates.subject) ticket.title = updates.subject;
+        if (updates.title) ticket.subject = updates.title;
+        if (updates.createdBy) ticket.userId = updates.createdBy;
+        if (updates.userId) ticket.createdBy = updates.userId;
+
+        // Monta snake_case para Supabase
+        const supaUpdates = {};
+        const mapping = {
+            subject: 'subject', title: 'subject',
+            description: 'description', priority: 'priority',
+            status: 'status', categoryId: 'category_id',
+            serviceId: 'service_id', serviceName: 'service_name',
+            createdBy: 'created_by', userId: 'created_by',
+            assignedTo: 'assigned_to', slaId: 'sla_id',
+            slaDeadline: 'sla_deadline', slaHours: 'sla_hours',
+            slaCountWeekends: 'sla_count_weekends',
+            formData: 'form_data', attachments: 'attachments',
+            history: 'history', updatedAt: 'updated_at',
+            resolvedAt: 'resolved_at', acceptanceDeadline: 'acceptance_deadline',
+            satisfactionSent: 'satisfaction_sent', closedAt: 'closed_at'
+        };
+
+        for (const [key, val] of Object.entries(updates)) {
+            if (mapping[key]) supaUpdates[mapping[key]] = val;
+        }
+
+        if (Object.keys(supaUpdates).length > 0) {
             try {
-                var filePath = 'tickets/' + newId + '/' + Date.now() + '_' + att.name;
-                var uploadResp = await fetch(
-                    SUPABASE_URL + '/storage/v1/object/attachments/' + filePath,
-                    {
-                        method: 'POST',
-                        headers: {
-                            'apikey': SUPABASE_KEY,
-                            'Authorization': 'Bearer ' + SUPABASE_KEY
-                        },
-                        body: att
-                    }
-                );
-                if (uploadResp.ok) {
-                    var publicUrl = SUPABASE_URL + '/storage/v1/object/public/attachments/' + filePath;
-                    uploadedAttachments.push({ name: att.name, size: att.size, url: publicUrl });
-                } else {
-                    console.error('Erro upload anexo ticket:', await uploadResp.text());
-                }
-            } catch(e) { console.error('Erro upload:', e); }
+                await supaRest.update('tickets', ticketId, supaUpdates);
+                console.log(`✅ Ticket ${ticketId} atualizado no Supabase`);
+            } catch(e) {
+                console.error(`❌ Erro ao atualizar ticket ${ticketId}:`, e);
+            }
         }
-    }
 
-
-    var supaMsg = {
-        id: newId,
-        ticket_id: messageData.ticketId,
-        user_id: messageData.userId,
-        text: messageData.text || '',
-        type: messageData.type || 'message',
-        attachments: uploadedAttachments,
-        created_at: now
+        localStorage.setItem('rh_desk_tickets', JSON.stringify(db.tickets));
     };
+}
 
-    try {
-        await supaRest.insert('messages', supaMsg);
-        console.log('Mensagem salva no Supabase:', newId);
-    } catch(e) {
-        console.error('Erro Supabase addMessage:', e);
-    }
+// ============================================
+// OVERRIDE: db.addTicketHistory
+// ============================================
+if (typeof db !== 'undefined') {
+    db.addTicketHistory = async function(ticketId, entry) {
+        const ticket = db.tickets.find(t => t.id === ticketId);
+        if (!ticket) return;
 
-    var localMsg = {
-        id: newId,
-        ticketId: messageData.ticketId,
-        userId: messageData.userId,
-        text: messageData.text || '',
-        type: messageData.type || 'message',
-        attachments: uploadedAttachments,
-        createdAt: now
+        if (!ticket.history) ticket.history = [];
+        ticket.history.push(entry);
+
+        try {
+            await supaRest.update('tickets', ticketId, {
+                history: ticket.history,
+                updated_at: new Date().toISOString()
+            });
+        } catch(e) {
+            console.error(`❌ Erro ao adicionar histórico ao ticket ${ticketId}:`, e);
+        }
+
+        localStorage.setItem('rh_desk_tickets', JSON.stringify(db.tickets));
     };
+}
 
-    db.data.messages.push(localMsg);
-    db.saveToLocal();
-    return localMsg;
-};
+// ============================================
+// OVERRIDE: db.addMessage
+// ============================================
+if (typeof db !== 'undefined') {
+    db.addMessage = async function(msg) {
+        const msgId = msg.id || ('MSG' + String((db.messages || []).length + 1).padStart(5, '0'));
+        const now = new Date().toISOString();
 
+        const localMsg = {
+            id: msgId,
+            ticketId: msg.ticketId,
+            userId: msg.userId,
+            type: msg.type || 'message',
+            text: msg.text || '',
+            attachment: msg.attachment || null,
+            attachments: msg.attachments || [],
+            createdAt: msg.createdAt || now
+        };
 
-// === Funções de catálogo ===
-db.addCategory = async function(categoryData) {
-    if (!db.data.catalog.categories) db.data.catalog.categories = [];
-    var maxNum = 0;
-    db.data.catalog.categories.forEach(function(c) {
-        var num = parseInt(c.id.replace('CAT', ''));
-        if (num > maxNum) maxNum = num;
-    });
-    var newId = 'CAT' + String(maxNum + 1).padStart(3, '0');
-    var cat = {
-        id: newId,
-        name: categoryData.name,
-        description: categoryData.description || '',
-        icon: categoryData.icon || 'fa-folder',
-        color: categoryData.color || '#6b7280',
-        active: true,
-        services: []
+        if (!db.messages) db.messages = [];
+        db.messages.push(localMsg);
+
+        // Upload de anexos para Supabase Storage se existirem
+        let uploadedAttachments = [];
+        if (localMsg.attachments && localMsg.attachments.length > 0) {
+            for (const att of localMsg.attachments) {
+                // Se já é URL, mantém
+                if (typeof att === 'string' && att.startsWith('http')) {
+                    uploadedAttachments.push(att);
+                } else if (att && att.data) {
+                    // Tenta upload para Storage
+                    try {
+                        const fileName = `messages/${msgId}/${Date.now()}_${att.name || 'file'}`;
+                        const blob = att.data instanceof Blob ? att.data : 
+                                     (typeof att.data === 'string' ? await fetch(att.data).then(r => r.blob()) : null);
+                        if (blob) {
+                            const uploadRes = await fetch(`${SUPABASE_URL}/storage/v1/object/attachments/${fileName}`, {
+                                method: 'POST',
+                                headers: {
+                                    'apikey': SUPABASE_KEY,
+                                    'Authorization': `Bearer ${SUPABASE_KEY}`,
+                                    'Content-Type': blob.type || 'application/octet-stream'
+                                },
+                                body: blob
+                            });
+                            if (uploadRes.ok) {
+                                uploadedAttachments.push(`${SUPABASE_URL}/storage/v1/object/public/attachments/${fileName}`);
+                            } else {
+                                uploadedAttachments.push(att);
+                            }
+                        } else {
+                            uploadedAttachments.push(att);
+                        }
+                    } catch(e) {
+                        console.error('Erro upload anexo:', e);
+                        uploadedAttachments.push(att);
+                    }
+                } else {
+                    uploadedAttachments.push(att);
+                }
+            }
+        }
+
+        // Salva mensagem no Supabase
+        try {
+            await supaRest.insert('messages', {
+                id: msgId,
+                ticket_id: localMsg.ticketId,
+                user_id: localMsg.userId,
+                type: localMsg.type,
+                text: localMsg.text,
+                attachments: uploadedAttachments.length > 0 ? uploadedAttachments : [],
+                created_at: localMsg.createdAt
+            });
+            console.log(`✅ Mensagem ${msgId} salva no Supabase`);
+        } catch(e) {
+            console.error(`❌ Erro ao salvar mensagem ${msgId}:`, e);
+        }
+
+        localStorage.setItem('rh_desk_messages', JSON.stringify(db.messages));
+        return localMsg;
     };
-    db.data.catalog.categories.push(cat);
-    await saveCatalogToSupabase();
-    db.saveToLocal();
-    return cat;
-};
+}
 
-db.updateCategory = async function(catId, updates) {
-    var cat = db.data.catalog.categories.find(function(c) { return c.id === catId; });
-    if (cat) {
-        Object.assign(cat, updates);
-        await saveCatalogToSupabase();
-        db.saveToLocal();
-    }
-    return cat;
-};
-
-db.deleteCategory = async function(catId) {
-    db.data.catalog.categories = db.data.catalog.categories.filter(function(c) { return c.id !== catId; });
-    await saveCatalogToSupabase();
-    db.saveToLocal();
-};
-
-db.addService = async function(catId, serviceData) {
-    var cat = db.data.catalog.categories.find(function(c) { return c.id === catId; });
-    if (!cat) return null;
-    if (!cat.services) cat.services = [];
-    var maxNum = 0;
-    db.data.catalog.categories.forEach(function(c) {
-        if (c.services) c.services.forEach(function(s) {
-            var num = parseInt(s.id.replace('SRV', ''));
-            if (num > maxNum) maxNum = num;
-        });
-    });
-    var newId = 'SRV' + String(maxNum + 1).padStart(3, '0');
-    var srv = {
-        id: newId,
-        name: serviceData.name,
-        description: serviceData.description || '',
-        formFields: serviceData.formFields || ['description'],
-        slaId: serviceData.slaId || 'SLA001',
-        active: true
-    };
-    cat.services.push(srv);
-    await saveCatalogToSupabase();
-    db.saveToLocal();
-    return srv;
-};
-
-db.updateService = async function(catId, serviceId, updates) {
-    var cat = db.data.catalog.categories.find(function(c) { return c.id === catId; });
-    if (!cat || !cat.services) return null;
-    var srv = cat.services.find(function(s) { return s.id === serviceId; });
-    if (srv) {
-        Object.assign(srv, updates);
-        await saveCatalogToSupabase();
-        db.saveToLocal();
-    }
-    return srv;
-};
-
-db.deleteService = async function(catId, serviceId) {
-    var cat = db.data.catalog.categories.find(function(c) { return c.id === catId; });
-    if (cat && cat.services) {
-        cat.services = cat.services.filter(function(s) { return s.id !== serviceId; });
-        await saveCatalogToSupabase();
-        db.saveToLocal();
-    }
-};
-
+// ============================================
+// CATALOG MANAGEMENT
+// ============================================
 async function saveCatalogToSupabase() {
     try {
-        await supaRest.upsert('catalog', { id: 1, data: db.data.catalog }, 'id');
+        await supaRest.upsert('catalog', { id: 1, data: db.catalog });
+        console.log('✅ Catálogo salvo no Supabase');
     } catch(e) {
-        console.error('Erro Supabase saveCatalog:', e);
+        console.error('❌ Erro ao salvar catálogo:', e);
     }
 }
 
-// === Funções de SLA ===
-db.addSLA = async function(slaData) {
-    var maxNum = 0;
-    db.data.sla.forEach(function(s) {
-        var num = parseInt(s.id.replace('SLA', ''));
-        if (num > maxNum) maxNum = num;
-    });
-    var newId = 'SLA' + String(maxNum + 1).padStart(3, '0');
-    var slaItem = {
-        id: newId,
-        name: slaData.name,
-        hours: parseInt(slaData.hours),
-        countWeekends: slaData.countWeekends || false,
-        active: true
+if (typeof db !== 'undefined') {
+    db.addCategory = async function(cat) {
+        if (!db.catalog) db.catalog = { categories: [] };
+        if (!db.catalog.categories) db.catalog.categories = [];
+        db.catalog.categories.push(cat);
+        await saveCatalogToSupabase();
+        localStorage.setItem('rh_desk_catalog', JSON.stringify(db.catalog));
     };
-    db.data.sla.push(slaItem);
-    try {
-        await supaRest.insert('sla', {
-            id: newId,
-            name: slaData.name,
-            hours: parseInt(slaData.hours),
-            count_weekends: slaData.countWeekends || false,
-            active: true
-        });
-    } catch(e) {
-        console.error('Erro Supabase addSLA:', e);
-    }
-    db.saveToLocal();
-    return slaItem;
-};
 
-db.updateSLA = async function(slaId, updates) {
-    var sla = db.data.sla.find(function(s) { return s.id === slaId; });
-    if (sla) {
-        Object.assign(sla, updates);
-        var supaUpdates = {};
+    db.updateCategory = async function(catId, updates) {
+        const cat = (db.catalog?.categories || []).find(c => c.id === catId);
+        if (cat) Object.assign(cat, updates);
+        await saveCatalogToSupabase();
+        localStorage.setItem('rh_desk_catalog', JSON.stringify(db.catalog));
+    };
+
+    db.deleteCategory = async function(catId) {
+        if (db.catalog?.categories) {
+            db.catalog.categories = db.catalog.categories.filter(c => c.id !== catId);
+        }
+        await saveCatalogToSupabase();
+        localStorage.setItem('rh_desk_catalog', JSON.stringify(db.catalog));
+    };
+
+    db.addService = async function(catId, service) {
+        const cat = (db.catalog?.categories || []).find(c => c.id === catId);
+        if (cat) {
+            if (!cat.services) cat.services = [];
+            cat.services.push(service);
+        }
+        await saveCatalogToSupabase();
+        localStorage.setItem('rh_desk_catalog', JSON.stringify(db.catalog));
+    };
+
+    db.updateService = async function(catId, serviceId, updates) {
+        const cat = (db.catalog?.categories || []).find(c => c.id === catId);
+        if (cat) {
+            const svc = (cat.services || []).find(s => s.id === serviceId);
+            if (svc) Object.assign(svc, updates);
+        }
+        await saveCatalogToSupabase();
+        localStorage.setItem('rh_desk_catalog', JSON.stringify(db.catalog));
+    };
+
+    db.deleteService = async function(catId, serviceId) {
+        const cat = (db.catalog?.categories || []).find(c => c.id === catId);
+        if (cat && cat.services) {
+            cat.services = cat.services.filter(s => s.id !== serviceId);
+        }
+        await saveCatalogToSupabase();
+        localStorage.setItem('rh_desk_catalog', JSON.stringify(db.catalog));
+    };
+
+    // Helper para obter categorias (usado por features.js)
+    db.getCategories = function() {
+        return db.catalog?.categories || [];
+    };
+
+    // Helper para obter serviços de uma categoria
+    db.getServices = function(catId) {
+        const cat = (db.catalog?.categories || []).find(c => c.id === catId);
+        return cat?.services || [];
+    };
+}
+
+// ============================================
+// SLA MANAGEMENT
+// ============================================
+if (typeof db !== 'undefined') {
+    db.addSLA = async function(sla) {
+        if (!db.sla) db.sla = [];
+        db.sla.push(sla);
+        try {
+            await supaRest.insert('sla', {
+                id: sla.id,
+                name: sla.name,
+                hours: sla.hours,
+                count_weekends: sla.countWeekends || false,
+                active: sla.active !== false
+            });
+        } catch(e) { console.error('Erro ao salvar SLA:', e); }
+        localStorage.setItem('rh_desk_sla', JSON.stringify(db.sla));
+    };
+
+    db.updateSLA = async function(slaId, updates) {
+        const sla = (db.sla || []).find(s => s.id === slaId);
+        if (sla) Object.assign(sla, updates);
+        const supaUpdates = {};
         if (updates.name !== undefined) supaUpdates.name = updates.name;
-        if (updates.hours !== undefined) supaUpdates.hours = parseInt(updates.hours);
+        if (updates.hours !== undefined) supaUpdates.hours = updates.hours;
         if (updates.countWeekends !== undefined) supaUpdates.count_weekends = updates.countWeekends;
         if (updates.active !== undefined) supaUpdates.active = updates.active;
         try {
-            await supaRest.update('sla', 'id=eq.' + slaId, supaUpdates);
-        } catch(e) {
-            console.error('Erro Supabase updateSLA:', e);
-        }
-        db.saveToLocal();
-    }
-    return sla;
-};
+            await supaRest.update('sla', slaId, supaUpdates);
+        } catch(e) { console.error('Erro ao atualizar SLA:', e); }
+        localStorage.setItem('rh_desk_sla', JSON.stringify(db.sla));
+    };
 
-db.deleteSLA = async function(slaId) {
-    db.data.sla = db.data.sla.filter(function(s) { return s.id !== slaId; });
-    try {
-        await supaRest.remove('sla', 'id=eq.' + slaId);
-    } catch(e) {
-        console.error('Erro Supabase deleteSLA:', e);
-    }
-    db.saveToLocal();
-};
+    db.deleteSLA = async function(slaId) {
+        db.sla = (db.sla || []).filter(s => s.id !== slaId);
+        try {
+            await supaRest.remove('sla', slaId);
+        } catch(e) { console.error('Erro ao remover SLA:', e); }
+        localStorage.setItem('rh_desk_sla', JSON.stringify(db.sla));
+    };
+}
 
-// === Tela de Configurações ===
-renderAdminSettings = function(container) {
-    container.innerHTML = '<div class="page-header"><h2><i class="fas fa-cog"></i> Configuracoes</h2></div>' +
-        '<div class="card"><div class="card-header"><h3><i class="fas fa-database"></i> Banco de Dados - Supabase</h3></div>' +
-        '<div class="card-body">' +
-        '<div style="background:#ecfdf5;border:1px solid #059669;border-radius:8px;padding:16px;margin-bottom:24px;">' +
-        '<div style="display:flex;align-items:center;gap:8px;color:#059669;font-weight:600;margin-bottom:8px;">' +
-        '<i class="fas fa-check-circle"></i> Conectado ao Supabase</div>' +
-        '<div style="font-size:13px;color:#374151;">' +
-        '<div><strong>Projeto:</strong> fnihosrvwitlnnlcarpf</div>' +
-        '<div><strong>Tipo:</strong> PostgreSQL (Supabase REST API)</div>' +
-        '<div><strong>Sincronizacao:</strong> Automatica em tempo real</div>' +
-        '</div></div>' +
-        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:16px;">' +
-        '<div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">' +
-        '<div style="font-size:24px;font-weight:700;color:var(--primary);">' + db.data.users.length + '</div><div style="font-size:12px;color:var(--gray-400);">Usuarios</div></div>' +
-        '<div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">' +
-        '<div style="font-size:24px;font-weight:700;color:var(--primary);">' + db.data.tickets.length + '</div><div style="font-size:12px;color:var(--gray-400);">Chamados</div></div>' +
-        '<div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">' +
-        '<div style="font-size:24px;font-weight:700;color:var(--primary);">' + (db.data.catalog.categories ? db.data.catalog.categories.length : 0) + '</div><div style="font-size:12px;color:var(--gray-400);">Categorias</div></div>' +
-        '<div style="background:var(--gray-50);padding:12px;border-radius:8px;text-align:center;">' +
-        '<div style="font-size:24px;font-weight:700;color:var(--primary);">' + db.data.messages.length + '</div><div style="font-size:12px;color:var(--gray-400);">Mensagens</div></div>' +
-        '</div>' +
-        '<button class="btn btn-primary" onclick="reloadFromSupabase()"><i class="fas fa-sync"></i> Recarregar Dados</button>' +
-        '</div></div>';
-};
+// ============================================
+// ADMIN UI: CONFIGURAÇÕES SUPABASE
+// ============================================
+function renderAdminSettings() {
+    const content = document.getElementById('content') || document.querySelector('.content-area');
+    if (!content) return;
+
+    const userCount = (db.users || []).length;
+    const ticketCount = (db.tickets || []).length;
+    const catCount = (db.catalog?.categories || []).length;
+    const msgCount = (db.messages || []).length;
+
+    content.innerHTML = `
+        <div style="padding:20px;">
+            <h2><i class="fas fa-cog"></i> Configurações</h2>
+            <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:15px;margin:15px 0;">
+                <p><strong>✅ Supabase conectado</strong></p>
+                <p style="color:#666;font-size:13px;">Projeto: fnihosrvwitlnnlcarpf</p>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:15px;margin:15px 0;">
+                <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:15px;text-align:center;">
+                    <div style="font-size:24px;font-weight:bold;color:#3b82f6;">${userCount}</div>
+                    <div style="color:#666;">Usuários</div>
+                </div>
+                <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:15px;text-align:center;">
+                    <div style="font-size:24px;font-weight:bold;color:#10b981;">${ticketCount}</div>
+                    <div style="color:#666;">Chamados</div>
+                </div>
+                <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:15px;text-align:center;">
+                    <div style="font-size:24px;font-weight:bold;color:#8b5cf6;">${catCount}</div>
+                    <div style="color:#666;">Categorias</div>
+                </div>
+                <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:15px;text-align:center;">
+                    <div style="font-size:24px;font-weight:bold;color:#f59e0b;">${msgCount}</div>
+                    <div style="color:#666;">Mensagens</div>
+                </div>
+            </div>
+            <button onclick="reloadFromSupabase()" style="background:#3b82f6;color:white;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;">
+                <i class="fas fa-sync"></i> Recarregar do Supabase
+            </button>
+        </div>
+    `;
+}
 
 async function reloadFromSupabase() {
-    showToast('Recarregando do Supabase...', 'info');
-    var ok = await loadFromSupabase();
-    if (ok) {
-        showToast('Dados atualizados!', 'success');
-        renderAdminSettings(document.getElementById('content'));
-    } else {
-        showToast('Erro ao recarregar', 'error');
-    }
+    showToast('Recarregando dados do Supabase...', 'info');
+    await loadFromSupabase();
+    showToast('Dados recarregados com sucesso!', 'success');
+    renderAdminSettings();
 }
 
-// Dentro de loadFromSupabase, substituir o bloco de Users por:
-var users = await supaRest.select('users', 'select=*&order=created_at.asc');
-if (users && users.length > 0) {
-    db.data.users = users.map(function(u) {
-        return {
-            id: u.id,
-            name: u.name,
-            email: u.email,
-            password: u.password,
-            role: u.role,
-            active: u.active,
-            createdAt: u.created_at,
-            created_at: u.created_at,
-            allowedCategories: u.allowed_categories || []
-        };
-    });
-    console.log('Supabase users:', users.length);
-}
-
-console.log('supabase-db.js v3 carregado (created_by/subject)');
+console.log('✅ supabase-db.js v4 carregado (robusto, com created_by/subject)');
