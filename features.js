@@ -46,66 +46,93 @@ window.handleFileSelect = function(input) {
 
 // Quando atendente marca como "resolvido", inicia prazo de 3 dias
 // CORRIGIDO: resolveTicket — usar colunas reais
-async function resolveTicket(ticketId, resolutionNote) {
-    var ticket = db.getTicketById(ticketId);
-    if (!ticket) return;
-    var now = new Date();
-    var deadline = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
-    
+async function resolveTicket(ticketId) {
+    const ticket = db.tickets.find(t => t.id === ticketId);
+    if (!ticket) return showToast('Chamado não encontrado', 'error');
+
+    const now = new Date().toISOString();
+    const deadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+
+    // Atualiza local primeiro
     ticket.status = 'resolvido';
-    ticket.resolvedAt = now.toISOString();
-    ticket.acceptanceDeadline = deadline.toISOString();
-    ticket.updatedAt = now.toISOString();
+    ticket.resolvedAt = now;
+    ticket.acceptanceDeadline = deadline;
+    ticket.updatedAt = now;
     if (!ticket.history) ticket.history = [];
     ticket.history.push({
-        action: 'Chamado resolvido',
+        at: now,
         by: currentUser.id,
-        at: now.toISOString(),
-        details: resolutionNote || 'Aguardando aceite do usuario (3 dias)'
+        action: 'Status: Resolvido',
+        details: ''
     });
-    
+
+    // Atualiza Supabase
     try {
-        await supaRest.update('tickets', 'id=eq.' + ticketId, {
+        await supaRest.update('tickets', ticketId, {
             status: 'resolvido',
-            resolved_at: now.toISOString(),
-            acceptance_deadline: deadline.toISOString(),
-            updated_at: now.toISOString(),
+            resolved_at: now,
+            acceptance_deadline: deadline,
+            updated_at: now,
             history: ticket.history
         });
-    } catch(e) { console.error('Erro resolve ticket:', e); }
-    
-    db.saveToLocal();
-    showToast('Chamado resolvido! Usuario tem 3 dias para aceitar ou reabrir.', 'success');
+    } catch(e) {
+        console.error('Erro ao resolver ticket no Supabase:', e);
+    }
+
+    // Mensagem de sistema
+    try {
+        await db.addMessage({
+            ticketId: ticketId,
+            userId: currentUser.id,
+            type: 'system',
+            text: 'Status: Resolvido',
+            attachments: []
+        });
+    } catch(e) {
+        console.error('Erro ao adicionar mensagem:', e);
+    }
+
+    localStorage.setItem('rh_desk_tickets', JSON.stringify(db.tickets));
+    showToast('Chamado resolvido! Aguardando aceite do solicitante (3 dias)', 'success');
+    renderSidebar();
+    if (typeof renderTicketDetail === 'function') renderTicketDetail(ticketId);
 }
+
 
 // CORRIGIDO: acceptResolution
 async function acceptResolution(ticketId) {
-    var ticket = db.getTicketById(ticketId);
-    if (!ticket) return;
-    var now = new Date().toISOString();
-    
+    const ticket = db.tickets.find(t => t.id === ticketId);
+    if (!ticket) return showToast('Chamado não encontrado', 'error');
+
+    const now = new Date().toISOString();
+
     ticket.status = 'fechado';
     ticket.closedAt = now;
     ticket.updatedAt = now;
     if (!ticket.history) ticket.history = [];
     ticket.history.push({
-        action: 'Resolucao aceita pelo usuario',
-        by: currentUser.id,
         at: now,
-        details: 'Chamado fechado'
+        by: currentUser.id,
+        action: 'Resolução aceita - Chamado fechado',
+        details: ''
     });
-    
+
     try {
-        await supaRest.update('tickets', 'id=eq.' + ticketId, {
+        await supaRest.update('tickets', ticketId, {
             status: 'fechado',
             closed_at: now,
             updated_at: now,
             history: ticket.history
         });
-    } catch(e) { console.error('Erro accept:', e); }
-    
-    db.saveToLocal();
-    showToast('Chamado fechado com sucesso!', 'success');
+    } catch(e) {
+        console.error('Erro ao aceitar resolução no Supabase:', e);
+    }
+
+    localStorage.setItem('rh_desk_tickets', JSON.stringify(db.tickets));
+    showToast('Resolução aceita! Chamado fechado.', 'success');
+    renderSidebar();
+
+    // Mostra pesquisa de satisfação
     showSatisfactionSurvey(ticketId);
 }
 
@@ -179,82 +206,132 @@ async function autoCloseExpiredTickets() {
 // 3. PESQUISA DE SATISFAÇÃO
 // ============================================
 function showSatisfactionSurvey(ticketId) {
-    var bodyHtml = '<div style="text-align:center;padding:20px 0;">' +
-        '<i class="fas fa-star" style="font-size:48px;color:#f59e0b;margin-bottom:16px;"></i>' +
-        '<h3 style="margin-bottom:8px;">Como foi seu atendimento?</h3>' +
-        '<p style="color:var(--gray-500);margin-bottom:24px;">Chamado: ' + ticketId + '</p>' +
-        '<div id="star-rating" style="display:flex;justify-content:center;gap:8px;margin-bottom:24px;">';
-    for (var i = 1; i <= 5; i++) {
-        bodyHtml += '<i class="fas fa-star" data-rating="' + i + '" ' +
-            'onclick="selectRating(' + i + ')" ' +
-            'style="font-size:36px;color:#d1d5db;cursor:pointer;transition:color 0.2s;" ' +
-            'onmouseenter="hoverRating(' + i + ')" onmouseleave="hoverRating(0)"></i>';
-    }
-    bodyHtml += '</div>' +
-        '<input type="hidden" id="survey-rating" value="0">' +
-        '<div class="form-group" style="text-align:left;">' +
-        '<label>Comentario (opcional)</label>' +
-        '<textarea id="survey-comment" rows="3" placeholder="Conte como foi sua experiencia..."></textarea>' +
-        '</div></div>';
-    
-    var footerHtml = '<button class="btn btn-secondary" onclick="closeModal()">Pular</button>' +
-        '<button class="btn btn-primary" onclick="submitSurvey(\'' + ticketId + '\')"><i class="fas fa-paper-plane"></i> Enviar Avaliacao</button>';
-    
-    openModal('Pesquisa de Satisfacao', bodyHtml, footerHtml);
+    window._selectedRating = 0;
+
+    const modalHTML = `
+        <div class="modal-overlay" id="satisfaction-modal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;">
+            <div style="background:white;border-radius:12px;padding:30px;max-width:450px;width:90%;text-align:center;">
+                <h3 style="margin-bottom:5px;">Pesquisa de Satisfação</h3>
+                <p style="color:#666;margin-bottom:5px;">Como foi seu atendimento?</p>
+                <p style="color:#999;font-size:13px;">Chamado: ${ticketId}</p>
+
+                <div class="satisfaction-stars" style="font-size:40px;cursor:pointer;margin:15px 0;">
+                    <span class="star" data-value="1" onclick="selectRating(1)" onmouseover="hoverRating(1)" onmouseout="hoverRating(0)">★</span>
+                    <span class="star" data-value="2" onclick="selectRating(2)" onmouseover="hoverRating(2)" onmouseout="hoverRating(0)">★</span>
+                    <span class="star" data-value="3" onclick="selectRating(3)" onmouseover="hoverRating(3)" onmouseout="hoverRating(0)">★</span>
+                    <span class="star" data-value="4" onclick="selectRating(4)" onmouseover="hoverRating(4)" onmouseout="hoverRating(0)">★</span>
+                    <span class="star" data-value="5" onclick="selectRating(5)" onmouseover="hoverRating(5)" onmouseout="hoverRating(0)">★</span>
+                </div>
+
+                <p style="font-weight:bold;margin-bottom:8px;">Comentário (opcional)</p>
+                <textarea id="satisfaction-comment" placeholder="Conte como foi sua experiência..." 
+                    style="width:100%;height:80px;border:1px solid #ddd;border-radius:8px;padding:10px;resize:none;box-sizing:border-box;"></textarea>
+
+                <div style="margin-top:20px;display:flex;gap:10px;justify-content:center;">
+                    <button onclick="document.getElementById('satisfaction-modal').remove()" 
+                        style="padding:10px 25px;border:1px solid #ddd;border-radius:8px;background:white;cursor:pointer;">Pular</button>
+                    <button onclick="submitSurvey('${ticketId}')" 
+                        style="padding:10px 25px;border:none;border-radius:8px;background:#3b82f6;color:white;cursor:pointer;">Enviar Avaliação</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
 }
 
-function selectRating(n) {
-    document.getElementById('survey-rating').value = n;
-    var stars = document.querySelectorAll('#star-rating .fa-star');
-    stars.forEach(function(s, idx) {
-        s.style.color = idx < n ? '#f59e0b' : '#d1d5db';
-    });
-}
-
-function hoverRating(n) {
-    var current = parseInt(document.getElementById('survey-rating').value) || 0;
-    var stars = document.querySelectorAll('#star-rating .fa-star');
-    stars.forEach(function(s, idx) {
-        if (n > 0) {
-            s.style.color = idx < n ? '#f59e0b' : '#d1d5db';
+function selectRating(value) {
+    window._selectedRating = value;
+    const stars = document.querySelectorAll('.satisfaction-stars .star');
+    stars.forEach(s => {
+        const v = parseInt(s.dataset.value);
+        s.style.color = v <= value ? '#f59e0b' : '#d1d5db';
+        if (v <= value) {
+            s.classList.add('selected');
         } else {
-            s.style.color = idx < current ? '#f59e0b' : '#d1d5db';
+            s.classList.remove('selected');
         }
     });
 }
 
+function hoverRating(value) {
+    if (window._selectedRating) return; // Não hover se já selecionou
+    const stars = document.querySelectorAll('.satisfaction-stars .star');
+    stars.forEach(s => {
+        const v = parseInt(s.dataset.value);
+        s.style.color = v <= value ? '#f59e0b' : '#d1d5db';
+    });
+}
+
+
 async function submitSurvey(ticketId) {
-    var rating = parseInt(document.getElementById('survey-rating').value);
-    if (!rating || rating < 1) {
-        showToast('Selecione uma nota de 1 a 5', 'warning');
-        return;
+    const ratingEl = document.querySelector('.satisfaction-stars .star.selected:last-of-type') ||
+                     document.querySelector('.star.active:last-of-type');
+
+    // Busca a nota pela quantidade de estrelas selecionadas
+    let rating = 0;
+    const allStars = document.querySelectorAll('.satisfaction-stars .star, .stars-container .star');
+    allStars.forEach(s => {
+        if (s.classList.contains('selected') || s.classList.contains('active')) {
+            const val = parseInt(s.dataset.value || s.dataset.rating || s.getAttribute('data-value'));
+            if (val > rating) rating = val;
+        }
+    });
+
+    // Fallback: tenta pegar do atributo global
+    if (!rating) {
+        rating = window._selectedRating || 0;
     }
-    var comment = document.getElementById('survey-comment').value.trim();
-    var surveyId = 'SAT' + Date.now();
-    
+
+    if (!rating || rating < 1) {
+        return showToast('Selecione uma avaliação (1-5 estrelas)', 'error');
+    }
+
+    const commentEl = document.querySelector('#satisfaction-comment, .satisfaction-comment, textarea[name="comment"]');
+    const comment = commentEl ? commentEl.value.trim() : '';
+
+    const now = new Date().toISOString();
+    const surveyId = 'SAT' + Date.now();
+
+    // Insert na tabela satisfaction_surveys
     try {
         await supaRest.insert('satisfaction_surveys', {
             id: surveyId,
             ticket_id: ticketId,
             user_id: currentUser.id,
             rating: rating,
-            comment: comment
+            comment: comment,
+            created_at: now
         });
-        // Marcar ticket como pesquisa enviada
-        await supaRest.update('tickets', 'id=eq.' + ticketId, {
-            satisfaction_sent: true
-        });
-        var ticket = db.getTicketById(ticketId);
-        if (ticket) ticket.satisfactionSent = true;
-        db.saveToLocal();
-        
-        showToast('Obrigado pela avaliacao!', 'success');
-        closeModal();
     } catch(e) {
-        console.error('Erro survey:', e);
-        showToast('Erro ao enviar avaliacao', 'error');
+        console.error('Erro ao salvar pesquisa de satisfação:', e);
+        showToast('Erro ao enviar avaliação. Tente novamente.', 'error');
+        return;
     }
+
+    // Marca ticket como satisfaction_sent
+    const ticket = db.tickets.find(t => t.id === ticketId);
+    if (ticket) {
+        ticket.satisfactionSent = true;
+        try {
+            await supaRest.update('tickets', ticketId, {
+                satisfaction_sent: true
+            });
+        } catch(e) {
+            console.error('Erro ao atualizar satisfaction_sent:', e);
+        }
+        localStorage.setItem('rh_desk_tickets', JSON.stringify(db.tickets));
+    }
+
+    // Fecha o modal
+    const modal = document.querySelector('.modal-overlay, .modal, #satisfaction-modal');
+    if (modal) modal.remove();
+
+    showToast('Avaliação enviada com sucesso! Obrigado!', 'success');
+    renderSidebar();
+    if (typeof renderTicketDetail === 'function') renderTicketDetail(ticketId);
 }
+
 
 // ============================================
 // 4. RELATÓRIOS (apenas admin)
