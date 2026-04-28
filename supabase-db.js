@@ -137,22 +137,26 @@ async function loadFromSupabase() {
             console.log('Supabase tickets:', db.data.tickets.length);
         }
 
-        // Messages
-        var messages = await supaRest.select('messages', 'select=*&order=created_at.asc');
-        if (messages) {
-            db.data.messages = messages.map(function(m) {
-                return {
-                    id: m.id,
-                    ticketId: m.ticket_id,
-                    userId: m.user_id,
-                    text: m.text,
-                    type: m.type,
-                    attachments: m.attachments || [],
-                    createdAt: m.created_at
-                };
-            });
-            console.log('Supabase messages:', db.data.messages.length);
-        }
+        // === MESSAGES ===
+try {
+    const messages = await supaRest.select('messages', '*', 'order=created_at.asc');
+    if (messages && messages.length > 0) {
+        db.messages = messages.map(m => ({
+            id: m.id,
+            ticketId: m.ticket_id,
+            userId: m.user_id,
+            type: m.type,
+            text: m.text,
+            attachment: m.attachment || null,
+            attachments: m.attachments || [],
+            createdAt: m.created_at
+        }));
+        console.log(`✅ ${messages.length} mensagens carregadas do Supabase`);
+    }
+} catch(e) {
+    console.error('Erro ao carregar mensagens:', e);
+}
+
 
         // Catalog
         var catalog = await supaRest.select('catalog', 'select=*');
