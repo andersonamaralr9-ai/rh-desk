@@ -849,13 +849,15 @@ setInterval(function() {
 }, 1000);
 
 // ============================================
+// ============================================
 // 10. RECARREGAR MENSAGENS AO ABRIR TICKET
 // ============================================
 if (typeof renderTicketDetail === 'function' && !window._ticketDetailPatched) {
     window._ticketDetailPatched = true;
-    var _patchedRenderTicketDetail = renderTicketDetail;
+    var _patchedOrigRenderTicketDetail = renderTicketDetail;
 
-    window.renderTicketDetail = async function(ticketId) {
+    window.renderTicketDetail = async function(container, ticketId) {
+        // Recarrega mensagens do Supabase antes de exibir
         try {
             var freshMsgs = await supaRest.select('messages', '*', 'ticket_id=eq.' + ticketId + '&order=created_at.asc');
             if (freshMsgs && freshMsgs.length > 0) {
@@ -869,8 +871,14 @@ if (typeof renderTicketDetail === 'function' && !window._ticketDetailPatched) {
                 });
             }
         } catch(e) { console.error('Erro recarregar msgs:', e); }
-        _patchedRenderTicketDetail.apply(this, arguments);
+
+        // Chama original com os parâmetros corretos: (container, ticketId)
+        _patchedOrigRenderTicketDetail.call(this, container, ticketId);
     };
+
+    // Também atualiza o navigateTo interno para funcionar
+    renderTicketDetail = window.renderTicketDetail;
 }
+
 
 console.log('✅ features.js v3 carregado (db.data.*)');
