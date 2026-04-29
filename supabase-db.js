@@ -346,12 +346,7 @@ function ticketToSupabase(t) {
     };
 
     try {
-        Object.defineProperty(db, 'getMessages', {
-            get: function() { return _correctGetMessages; },
-            set: function() { /* ignora tentativas de sobrescrita */ },
-            configurable: false
-        });
-        console.log('✅ db.getMessages protegido contra sobrescrita');
+       ;
     } catch(e) {
         // Fallback se defineProperty falhar
         db.getMessages = _correctGetMessages;
