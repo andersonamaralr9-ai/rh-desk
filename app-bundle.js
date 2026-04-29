@@ -852,9 +852,24 @@ function renderChatMessages(messages) {
         var initial = u ? u.name.charAt(0).toUpperCase() : '?';
         var attachHtml = '';
         if (msg.attachment) {
-            var url = db.useGitHub ? githubAPI.getDownloadUrl(msg.attachment.path) : (msg.attachment.data || '#');
-            attachHtml = '<a class="msg-attachment" href="' + url + '" target="_blank"><i class="fas fa-download"></i> ' + escapeHtml(msg.attachment.name) + '</a>';
+            var url = '#';
+            var attachName = 'arquivo';
+            if (typeof msg.attachment === 'string') {
+                url = msg.attachment;
+                attachName = 'arquivo';
+            } else if (typeof msg.attachment === 'object') {
+                if (msg.attachment.url && msg.attachment.url.startsWith('http')) {
+                    url = msg.attachment.url;
+                } else if (db.useGitHub && msg.attachment.path) {
+                    url = githubAPI.getDownloadUrl(msg.attachment.path);
+                } else {
+                    url = msg.attachment.data || msg.attachment.url || '#';
+                }
+                attachName = msg.attachment.name || msg.attachment.fileName || 'arquivo';
+            }
+            attachHtml = '<a class="msg-attachment" href="' + url + '" target="_blank"' + (url.startsWith('data:') ? ' download="' + escapeHtml(attachName) + '"' : '') + '><i class="fas fa-download"></i> ' + escapeHtml(attachName) + '</a>';
         }
+        
         return '<div class="chat-message ' + (isOwn ? 'own' : '') + '"><div class="chat-message-avatar" style="background:' + color + '">' + initial + '</div><div class="chat-message-bubble"><div class="msg-author">' + (u ? u.name : '?') + (u && (u.role === 'analyst' || u.role === 'admin') ? ' <span style="font-size:10px;opacity:0.7">RH</span>' : '') + '</div><div class="msg-text">' + escapeHtml(msg.text) + '</div>' + attachHtml + '<div class="msg-time">' + formatDate(msg.createdAt) + '</div></div></div>';
     }).join('');
 }
