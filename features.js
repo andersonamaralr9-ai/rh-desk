@@ -853,5 +853,30 @@ setInterval(function() {
 // ============================================
 // ============================================
 
+// ============================================
+// 10. Recarregar mensagens ao abrir ticket
+// ============================================
+(function() {
+    if (typeof navigateTo !== 'function') return;
+    var _navOriginal = navigateTo;
+    navigateTo = function(page, params) {
+        if (page === 'ticket-detail' && params && params.id) {
+            var ticketId = params.id;
+            // Recarregar mensagens do Supabase ANTES de renderizar
+            if (typeof reloadMessagesFromSupabase === 'function') {
+                reloadMessagesFromSupabase(ticketId).then(function() {
+                    _navOriginal(page, params);
+                }).catch(function(e) {
+                    console.error('Erro ao recarregar mensagens:', e);
+                    _navOriginal(page, params);
+                });
+                return;
+            }
+        }
+        _navOriginal(page, params);
+    };
+})();
+console.log('✅ features.js — seção 10 carregada');
+
 
 console.log('✅ features.js v3 carregado (db.data.*)');
