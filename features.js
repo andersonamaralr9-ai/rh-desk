@@ -850,35 +850,60 @@ setInterval(function() {
 
 // ============================================
 // ============================================
-// 10. RECARREGAR MENSAGENS AO ABRIR TICKET
 // ============================================
-if (typeof renderTicketDetail === 'function' && !window._ticketDetailPatched) {
-    window._ticketDetailPatched = true;
-    var _patchedOrigRenderTicketDetail = renderTicketDetail;
+// 10. CORRIGIR MENSAGENS NO TICKET DETAIL
+// ============================================
+// O app-bundle.js tem um bug: dentro de renderTicketDetail ele faz
+//   db.getMessages = function(ticketId) { return (db.messages || []).filter(...) }
+// Isso usa db.messages que NÃO EXISTE (o correto é db.data.messages).
+//
+// Solução: garantir que db.getMessages sempre aponte para db.data.messages
+// e PRÉ-carregar mensagens do Supabase ao clicar em "Ver" chamado.
 
-    window.renderTicketDetail = async function(container, ticketId) {
-        // Recarrega mensagens do Supabase antes de exibir
-        try {
-            var freshMsgs = await supaRest.select('messages', '*', 'ticket_id=eq.' + ticketId + '&order=created_at.asc');
-            if (freshMsgs && freshMsgs.length > 0) {
-                db.data.messages = (db.data.messages||[]).filter(function(m){return m.ticketId!==ticketId;});
-                freshMsgs.forEach(function(m) {
-                    db.data.messages.push({
-                        id: m.id, ticketId: m.ticket_id, userId: m.user_id,
-                        type: m.type, text: m.text, attachment: m.attachment||null,
-                        attachments: m.attachments||[], createdAt: m.created_at
-                    });
+(function() {
+    // Override do navigateTo para interceptar ticket-detail
+    var _navOrigForMessages = navigateTo;
+    navigateTo = function(page, params) {
+        if (page === 'ticket-detail' && params && params.id) {
+            // Carrega mensagens frescas do Supabase ANTES de renderizar
+            var ticketId = params.id;
+            supaRest.select('messages', '*', 'ticket_id=eq.' + ticketId + '&order=created_at.asc')
+                .then(function(freshMsgs) {
+                    if (freshMsgs && freshMsgs.length > 0) {
+                        // Remove mensagens antigas deste ticket
+                        db.data.messages = (db.data.messages || []).filter(function(m) {
+                            return m.ticketId !== ticketId;
+                        });
+                        // Adiciona as frescas
+                        freshMsgs.forEach(function(m) {
+                            db.data.messages.push({
+                                id: m.id, ticketId: m.ticket_id, userId: m.user_id,
+                                type: m.type, text: m.text, attachment: m.attachment || null,
+                                attachments: m.attachments || [], createdAt: m.created_at
+                            });
+                        });
+                    }
+                })
+                .catch(function(e) { console.error('Erro msgs:', e); })
+                .finally(function() {
+                    // Agora chama o navigateTo original (que chama renderTicketDetail)
+                    _navOrigForMessages(page, params);
+
+                    // Re-corrige db.getMessages que o renderTicketDetail sobrescreveu
+                    db.getMessages = function(tid) {
+                        return (db.data.messages || []).filter(function(m) {
+                            return m.ticketId === tid;
+                        }).sort(function(a, b) {
+                            return new Date(a.createdAt) - new Date(b.createdAt);
+                        });
+                    };
                 });
-            }
-        } catch(e) { console.error('Erro recarregar msgs:', e); }
-
-        // Chama original com os parâmetros corretos: (container, ticketId)
-        _patchedOrigRenderTicketDetail.call(this, container, ticketId);
+            return; // Não chama o original ainda — será chamado no finally
+        }
+        // Para todas as outras páginas, chama normalmente
+        _navOrigForMessages(page, params);
     };
-
-    // Também atualiza o navigateTo interno para funcionar
-    renderTicketDetail = window.renderTicketDetail;
-}
+})();
 
 
 console.log('✅ features.js v3 carregado (db.data.*)');
