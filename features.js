@@ -851,30 +851,21 @@ setInterval(function() {
 // ============================================
 // ============================================
 // ============================================
-// 10. CORRIGIR MENSAGENS NO TICKET DETAIL
 // ============================================
-// O app-bundle.js tem um bug: dentro de renderTicketDetail ele faz
-//   db.getMessages = function(ticketId) { return (db.messages || []).filter(...) }
-// Isso usa db.messages que NÃO EXISTE (o correto é db.data.messages).
-//
-// Solução: garantir que db.getMessages sempre aponte para db.data.messages
-// e PRÉ-carregar mensagens do Supabase ao clicar em "Ver" chamado.
-
+// 10. PRÉ-CARREGAR MENSAGENS DO SUPABASE
+// ============================================
 (function() {
-    // Override do navigateTo para interceptar ticket-detail
-    var _navOrigForMessages = navigateTo;
+    var _navForMsgs = navigateTo;
     navigateTo = function(page, params) {
         if (page === 'ticket-detail' && params && params.id) {
-            // Carrega mensagens frescas do Supabase ANTES de renderizar
             var ticketId = params.id;
+            // Carrega mensagens frescas, depois renderiza
             supaRest.select('messages', '*', 'ticket_id=eq.' + ticketId + '&order=created_at.asc')
                 .then(function(freshMsgs) {
                     if (freshMsgs && freshMsgs.length > 0) {
-                        // Remove mensagens antigas deste ticket
                         db.data.messages = (db.data.messages || []).filter(function(m) {
                             return m.ticketId !== ticketId;
                         });
-                        // Adiciona as frescas
                         freshMsgs.forEach(function(m) {
                             db.data.messages.push({
                                 id: m.id, ticketId: m.ticket_id, userId: m.user_id,
@@ -886,24 +877,14 @@ setInterval(function() {
                 })
                 .catch(function(e) { console.error('Erro msgs:', e); })
                 .finally(function() {
-                    // Agora chama o navigateTo original (que chama renderTicketDetail)
-                    _navOrigForMessages(page, params);
-
-                    // Re-corrige db.getMessages que o renderTicketDetail sobrescreveu
-                    db.getMessages = function(tid) {
-                        return (db.data.messages || []).filter(function(m) {
-                            return m.ticketId === tid;
-                        }).sort(function(a, b) {
-                            return new Date(a.createdAt) - new Date(b.createdAt);
-                        });
-                    };
+                    _navForMsgs(page, params);
                 });
-            return; // Não chama o original ainda — será chamado no finally
+            return;
         }
-        // Para todas as outras páginas, chama normalmente
-        _navOrigForMessages(page, params);
+        _navForMsgs(page, params);
     };
 })();
+
 
 
 console.log('✅ features.js v3 carregado (db.data.*)');
