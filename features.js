@@ -852,39 +852,6 @@ setInterval(function() {
 // ============================================
 // ============================================
 // ============================================
-// 10. PRÉ-CARREGAR MENSAGENS DO SUPABASE
-// ============================================
-(function() {
-    var _navForMsgs = navigateTo;
-    navigateTo = function(page, params) {
-        if (page === 'ticket-detail' && params && params.id) {
-            var ticketId = params.id;
-            // Carrega mensagens frescas, depois renderiza
-            supaRest.select('messages', '*', 'ticket_id=eq.' + ticketId + '&order=created_at.asc')
-                .then(function(freshMsgs) {
-                    if (freshMsgs && freshMsgs.length > 0) {
-                        db.data.messages = (db.data.messages || []).filter(function(m) {
-                            return m.ticketId !== ticketId;
-                        });
-                        freshMsgs.forEach(function(m) {
-                            db.data.messages.push({
-                                id: m.id, ticketId: m.ticket_id, userId: m.user_id,
-                                type: m.type, text: m.text, attachment: m.attachment || null,
-                                attachments: m.attachments || [], createdAt: m.created_at
-                            });
-                        });
-                    }
-                })
-                .catch(function(e) { console.error('Erro msgs:', e); })
-                .finally(function() {
-                    _navForMsgs(page, params);
-                });
-            return;
-        }
-        _navForMsgs(page, params);
-    };
-})();
-
 
 
 console.log('✅ features.js v3 carregado (db.data.*)');
