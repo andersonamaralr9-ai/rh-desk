@@ -791,7 +791,7 @@ function renderTicketDetail(container, ticketId) {
     var slaStatus = db.getSLAStatus(ticket);
     var createdBy = db.getUserById(ticket.createdBy);
     var assignedUser = ticket.assignedTo ? db.getUserById(ticket.assignedTo) : null;
-        var messages = db.getMessages(ticketId);
+    var messages = db.getMessages(ticketId);
     var analysts = db.getUsers().filter(function(u) { return u.role === 'analyst' || u.role === 'admin'; });
 
     var canManage = isAnalyst();
@@ -842,6 +842,7 @@ function renderTicketDetail(container, ticketId) {
     if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
 }
 
+// CORRIGIDO: renderChatMessages com suporte a URL do Supabase Storage
 function renderChatMessages(messages) {
     if (messages.length === 0) return '<div class="empty-state" style="padding:30px"><i class="fas fa-comments" style="font-size:32px"></i><p>Nenhuma mensagem</p></div>';
     return messages.map(function(msg) {
@@ -856,20 +857,24 @@ function renderChatMessages(messages) {
             var attachName = 'arquivo';
             if (typeof msg.attachment === 'string') {
                 url = msg.attachment;
-                attachName = 'arquivo';
             } else if (typeof msg.attachment === 'object') {
+                attachName = msg.attachment.name || msg.attachment.fileName || 'arquivo';
+                // CORRIGIDO: Priorizar URL do Supabase Storage
                 if (msg.attachment.url && msg.attachment.url.startsWith('http')) {
                     url = msg.attachment.url;
-                } else if (db.useGitHub && msg.attachment.path) {
+                } else if (msg.attachment.data && msg.attachment.data.startsWith('http')) {
+                    url = msg.attachment.data;
+                } else if (msg.attachment.data && msg.attachment.data.startsWith('data:')) {
+                    url = msg.attachment.data;
+                } else if (db.useGitHub && msg.attachment.path && !msg.attachment.path.startsWith('#')) {
                     url = githubAPI.getDownloadUrl(msg.attachment.path);
                 } else {
                     url = msg.attachment.data || msg.attachment.url || '#';
                 }
-                attachName = msg.attachment.name || msg.attachment.fileName || 'arquivo';
             }
-            attachHtml = '<a class="msg-attachment" href="' + url + '" target="_blank"' + (url.startsWith('data:') ? ' download="' + escapeHtml(attachName) + '"' : '') + '><i class="fas fa-download"></i> ' + escapeHtml(attachName) + '</a>';
+            var isDownload = (typeof url === 'string' && url.startsWith('data:'));
+            attachHtml = '<a class="msg-attachment" href="' + url + '" target="_blank"' + (isDownload ? ' download="' + escapeHtml(attachName) + '"' : '') + '><i class="fas fa-download"></i> ' + escapeHtml(attachName) + '</a>';
         }
-        
         return '<div class="chat-message ' + (isOwn ? 'own' : '') + '"><div class="chat-message-avatar" style="background:' + color + '">' + initial + '</div><div class="chat-message-bubble"><div class="msg-author">' + (u ? u.name : '?') + (u && (u.role === 'analyst' || u.role === 'admin') ? ' <span style="font-size:10px;opacity:0.7">RH</span>' : '') + '</div><div class="msg-text">' + escapeHtml(msg.text) + '</div>' + attachHtml + '<div class="msg-time">' + formatDate(msg.createdAt) + '</div></div></div>';
     }).join('');
 }
@@ -892,17 +897,41 @@ function handleChatKeyDown(event, ticketId) {
     if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(ticketId); }
 }
 
+// CORRIGIDO: sendFileMessage usa Supabase Storage
 async function sendFileMessage(ticketId, input) {
     var file = input.files[0];
     if (!file) return;
-    var path = 'attachments/' + Date.now() + '_' + file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-    var attachment = { name: file.name, path: path, size: file.size, type: file.type };
-    if (db.useGitHub) { try { await githubAPI.uploadFile(path, file); } catch (e) { console.error(e); } }
-    else {
-        var reader = new FileReader();
-        var base64 = await new Promise(function(resolve) { reader.onload = function() { resolve(reader.result); }; reader.readAsDataURL(file); });
-        attachment.data = base64;
+
+    var attachment = { name: file.name, size: file.size, type: file.type };
+
+    // Tentar upload para Supabase Storage primeiro
+    if (typeof uploadBlobToStorage === 'function') {
+        try {
+            var publicURL = await uploadBlobToStorage(file, ticketId, file.name);
+            if (publicURL) {
+                attachment.url = publicURL;
+                attachment.data = publicURL;
+                attachment.path = publicURL;
+                console.log('✅ Arquivo enviado para Supabase Storage:', publicURL);
+            }
+        } catch (e) {
+            console.error('Erro upload Supabase Storage:', e);
+        }
     }
+
+    // Fallback: se não conseguiu upload para Storage
+    if (!attachment.url) {
+        if (db.useGitHub) {
+            var path = 'attachments/' + Date.now() + '_' + file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+            attachment.path = path;
+            try { await githubAPI.uploadFile(path, file); } catch (e) { console.error(e); }
+        } else {
+            var reader = new FileReader();
+            var base64 = await new Promise(function(resolve) { reader.onload = function() { resolve(reader.result); }; reader.readAsDataURL(file); });
+            attachment.data = base64;
+        }
+    }
+
     await db.addMessage({ ticketId: ticketId, userId: currentUser.id, type: 'message', text: 'Arquivo: ' + file.name, attachment: attachment });
     showToast('Arquivo enviado!', 'success');
     renderTicketDetail(document.getElementById('content'), ticketId);
