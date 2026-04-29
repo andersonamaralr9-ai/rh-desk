@@ -415,14 +415,9 @@ async function reloadFromSupabase() {
 }
 
 // ============================================
-// FIX: renderTicketDetail sobrescreve db.getMessages com versão bugada
-// Precisamos re-aplicar nosso override DEPOIS de cada renderTicketDetail
-// ============================================
-(function() {
-   
-
 // ============================================
 // saveCatalogToSupabase (usado pelo features.js)
+
 // ============================================
 async function saveCatalogToSupabase() {
     try {
