@@ -329,22 +329,36 @@ function ticketToSupabase(t) {
 })();
 
 // ============================================
-// OVERRIDE: db.getMessages — Corrige o bug dentro de renderTicketDetail
+// ============================================
+// FIX CRÍTICO: Impedir que renderTicketDetail 
+// sobrescreva db.getMessages com versão bugada
 // ============================================
 (function() {
-    // O renderTicketDetail do app-bundle.js sobrescreve db.getMessages com
-    // db.messages (que não existe). Precisamos corrigir isso.
-    var _origGetMessages = db.getMessages.bind(db);
-
-    // Definimos no prototype para que sempre funcione
-    db.getMessages = function(ticketId) {
+    // Define db.getMessages como propriedade não-configurável
+    // Isso impede que o código bugado dentro de renderTicketDetail
+    // faça db.getMessages = function(...) { return (db.messages || [])... }
+    var _correctGetMessages = function(ticketId) {
         return (db.data.messages || []).filter(function(m) {
             return m.ticketId === ticketId;
         }).sort(function(a, b) {
             return new Date(a.createdAt) - new Date(b.createdAt);
         });
     };
+
+    try {
+        Object.defineProperty(db, 'getMessages', {
+            get: function() { return _correctGetMessages; },
+            set: function() { /* ignora tentativas de sobrescrita */ },
+            configurable: false
+        });
+        console.log('✅ db.getMessages protegido contra sobrescrita');
+    } catch(e) {
+        // Fallback se defineProperty falhar
+        db.getMessages = _correctGetMessages;
+        console.warn('⚠️ db.getMessages definido sem proteção');
+    }
 })();
+
 
 // ============================================
 // CATALOG sync para Supabase
