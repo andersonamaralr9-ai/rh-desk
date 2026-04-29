@@ -791,7 +791,9 @@ function renderTicketDetail(container, ticketId) {
     var slaStatus = db.getSLAStatus(ticket);
     var createdBy = db.getUserById(ticket.createdBy);
     var assignedUser = ticket.assignedTo ? db.getUserById(ticket.assignedTo) : null;
-    var messages = db.getMessages(ticketId);
+        var messages = db.getMessages(ticketId);
+    var analysts = db.getUsers().filter(function(u)
+
 
 };
     var analysts = db.getUsers().filter(function(u) { return u.role === 'analyst' || u.role === 'admin'; });
