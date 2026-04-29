@@ -410,15 +410,7 @@ async function reloadFromSupabase() {
 // Precisamos re-aplicar nosso override DEPOIS de cada renderTicketDetail
 // ============================================
 (function() {
-    var _correctGetMessages = db.getMessages;
-
-    // Observer que re-aplica db.getMessages se ele for sobrescrito
-    setInterval(function() {
-        if (db.getMessages !== _correctGetMessages) {
-            db.getMessages = _correctGetMessages;
-        }
-    }, 100);
-})();
+   
 
 // ============================================
 // saveCatalogToSupabase (usado pelo features.js)
