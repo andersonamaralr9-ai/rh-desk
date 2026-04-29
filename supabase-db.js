@@ -1,5 +1,5 @@
 // ============================================
-// SUPABASE-DB.JS v6 — Final, baseado no app-bundle.js real
+// SUPABASE-DB.JS v7 — Final limpo
 // ============================================
 
 var SUPABASE_URL = 'https://fnihosrvwitlnnlcarpf.supabase.co';
@@ -12,7 +12,6 @@ var supaRest = {
         'Content-Type': 'application/json',
         'Prefer': 'return=representation'
     },
-
     select: async function(table, columns, filter) {
         try {
             var url = SUPABASE_URL + '/rest/v1/' + table + '?select=' + (columns || '*');
@@ -22,7 +21,6 @@ var supaRest = {
             return await res.json();
         } catch(e) { console.error('SELECT ' + table + ':', e); return []; }
     },
-
     insert: async function(table, data) {
         try {
             var res = await fetch(SUPABASE_URL + '/rest/v1/' + table, {
@@ -32,7 +30,6 @@ var supaRest = {
             var r = await res.json(); return r[0] || r;
         } catch(e) { console.error('INSERT ' + table + ':', e); return null; }
     },
-
     update: async function(table, id, data) {
         try {
             var res = await fetch(SUPABASE_URL + '/rest/v1/' + table + '?id=eq.' + encodeURIComponent(id), {
@@ -42,7 +39,6 @@ var supaRest = {
             var r = await res.json(); return r[0] || r;
         } catch(e) { console.error('UPDATE ' + table + ' ' + id + ':', e); return null; }
     },
-
     remove: async function(table, id) {
         try {
             var res = await fetch(SUPABASE_URL + '/rest/v1/' + table + '?id=eq.' + encodeURIComponent(id), {
@@ -51,7 +47,6 @@ var supaRest = {
             return res.ok;
         } catch(e) { return false; }
     },
-
     upsert: async function(table, data) {
         try {
             var h = {}; for (var k in this.headers) h[k] = this.headers[k];
@@ -66,12 +61,11 @@ var supaRest = {
 };
 
 // ============================================
-// LOAD FROM SUPABASE → db.data.*
+// LOAD FROM SUPABASE
 // ============================================
 async function loadFromSupabase() {
     console.log('🔄 Carregando do Supabase...');
     var ok = false;
-
     try {
         var users = await supaRest.select('users', '*');
         if (users && users.length > 0) {
@@ -83,7 +77,6 @@ async function loadFromSupabase() {
             console.log('✅ ' + users.length + ' usuários');
         }
     } catch(e) { console.error('❌ users:', e); }
-
     try {
         var tickets = await supaRest.select('tickets', '*', 'order=created_at.desc');
         if (tickets && tickets.length > 0) {
@@ -102,7 +95,6 @@ async function loadFromSupabase() {
             console.log('✅ ' + tickets.length + ' tickets');
         } else { if (!db.data.tickets) db.data.tickets = []; }
     } catch(e) { console.error('❌ tickets:', e); }
-
     try {
         var msgs = await supaRest.select('messages', '*', 'order=created_at.asc');
         if (msgs && msgs.length > 0) {
@@ -114,7 +106,6 @@ async function loadFromSupabase() {
             console.log('✅ ' + msgs.length + ' mensagens');
         } else { if (!db.data.messages) db.data.messages = []; }
     } catch(e) { console.error('❌ messages:', e); }
-
     try {
         var cat = await supaRest.select('catalog', '*');
         if (cat && cat.length > 0 && cat[0].data) {
@@ -122,7 +113,6 @@ async function loadFromSupabase() {
             console.log('✅ Catálogo (' + (db.data.catalog.categories?db.data.catalog.categories.length:0) + ' cats)');
         }
     } catch(e) { console.error('❌ catalog:', e); }
-
     try {
         var sla = await supaRest.select('sla', '*');
         if (sla && sla.length > 0) {
@@ -132,14 +122,13 @@ async function loadFromSupabase() {
             console.log('✅ ' + sla.length + ' SLAs');
         }
     } catch(e) { console.error('❌ sla:', e); }
-
     try { db.saveToLocal(); } catch(e) {}
     console.log('✅ loadFromSupabase concluído');
     return ok;
 }
 
 // ============================================
-// Função auxiliar: sincronizar ticket para Supabase
+// Helper
 // ============================================
 function ticketToSupabase(t) {
     return {
@@ -159,40 +148,24 @@ function ticketToSupabase(t) {
 }
 
 // ============================================
-// OVERRIDE: db.addTicket
-// A original gera o ID, calcula SLA, faz push e syncToGitHub.
-// Precisamos manter essa lógica E adicionar INSERT no Supabase.
+// OVERRIDES — Wrap originais + sync Supabase
 // ============================================
 (function() {
+    // addTicket
     var _origAddTicket = db.addTicket.bind(db);
-
     db.addTicket = async function(ticket) {
-        // Chama o original — ele gera ID, calcula SLA, faz push em db.data.tickets
         var result = await _origAddTicket(ticket);
-
-        // Agora sincroniza com Supabase
         if (result && result.id) {
-            try {
-                await supaRest.insert('tickets', ticketToSupabase(result));
-                console.log('✅ Ticket ' + result.id + ' → Supabase');
-            } catch(e) {
-                console.error('❌ Ticket ' + result.id + ' Supabase:', e);
-            }
+            try { await supaRest.insert('tickets', ticketToSupabase(result)); console.log('✅ Ticket ' + result.id + ' → Supabase'); }
+            catch(e) { console.error('❌ Ticket Supabase:', e); }
         }
         return result;
     };
-})();
 
-// ============================================
-// OVERRIDE: db.updateTicket
-// ============================================
-(function() {
+    // updateTicket
     var _origUpdateTicket = db.updateTicket.bind(db);
-
     db.updateTicket = async function(id, updates) {
         var result = await _origUpdateTicket(id, updates);
-
-        // Sincroniza campos alterados com Supabase
         var mapping = {
             subject:'subject', title:'subject', description:'description',
             priority:'priority', status:'status', categoryId:'category_id',
@@ -204,79 +177,46 @@ function ticketToSupabase(t) {
             resolvedAt:'resolved_at', acceptanceDeadline:'acceptance_deadline',
             satisfactionSent:'satisfaction_sent', closedAt:'closed_at'
         };
-        var supaUpdates = {};
-        for (var key in updates) {
-            if (mapping[key]) supaUpdates[mapping[key]] = updates[key];
-        }
-        // Sempre inclui updated_at
-        if (!supaUpdates.updated_at) supaUpdates.updated_at = new Date().toISOString();
-
-        if (Object.keys(supaUpdates).length > 0) {
-            try { await supaRest.update('tickets', id, supaUpdates); }
-            catch(e) { console.error('❌ updateTicket Supabase:', e); }
+        var su = {};
+        for (var key in updates) { if (mapping[key]) su[mapping[key]] = updates[key]; }
+        if (!su.updated_at) su.updated_at = new Date().toISOString();
+        if (Object.keys(su).length > 0) {
+            try { await supaRest.update('tickets', id, su); } catch(e) { console.error('❌ updateTicket:', e); }
         }
         return result;
     };
-})();
 
-// ============================================
-// OVERRIDE: db.addTicketHistory
-// ============================================
-(function() {
-    var _orig = db.addTicketHistory.bind(db);
-
+    // addTicketHistory
+    var _origAddTicketHistory = db.addTicketHistory.bind(db);
     db.addTicketHistory = async function(ticketId, action, userId, details) {
-        await _orig(ticketId, action, userId, details);
-
+        await _origAddTicketHistory(ticketId, action, userId, details);
         var ticket = db.getTicketById(ticketId);
         if (ticket) {
-            try {
-                await supaRest.update('tickets', ticketId, {
-                    history: ticket.history, updated_at: ticket.updatedAt
-                });
-            } catch(e) {}
+            try { await supaRest.update('tickets', ticketId, { history: ticket.history, updated_at: ticket.updatedAt }); } catch(e) {}
         }
     };
-})();
 
-// ============================================
-// OVERRIDE: db.addMessage
-// ============================================
-(function() {
-    var _orig = db.addMessage.bind(db);
-
+    // addMessage
+    var _origAddMessage = db.addMessage.bind(db);
     db.addMessage = async function(message) {
-        // Original gera ID, createdAt, faz push e syncToGitHub
-        var result = await _orig(message);
-
+        var result = await _origAddMessage(message);
         if (result && result.id) {
             try {
                 await supaRest.insert('messages', {
-                    id: result.id,
-                    ticket_id: result.ticketId,
-                    user_id: result.userId,
-                    type: result.type || 'message',
-                    text: result.text || '',
-                    attachments: result.attachments || [],
-                    created_at: result.createdAt
+                    id: result.id, ticket_id: result.ticketId, user_id: result.userId,
+                    type: result.type || 'message', text: result.text || '',
+                    attachments: result.attachments || [], created_at: result.createdAt
                 });
                 console.log('✅ Msg ' + result.id + ' → Supabase');
-            } catch(e) {
-                console.error('❌ Msg Supabase:', e);
-            }
+            } catch(e) { console.error('❌ Msg Supabase:', e); }
         }
         return result;
     };
-})();
 
-// ============================================
-// OVERRIDE: db.addUser
-// ============================================
-(function() {
-    var _orig = db.addUser.bind(db);
-
+    // addUser
+    var _origAddUser = db.addUser.bind(db);
     db.addUser = async function(user) {
-        var result = await _orig(user);
+        var result = await _origAddUser(user);
         if (result && result.id) {
             try {
                 await supaRest.insert('users', {
@@ -286,21 +226,15 @@ function ticketToSupabase(t) {
                     created_at: result.createdAt || new Date().toISOString(),
                     allowed_categories: result.allowedCategories || []
                 });
-                console.log('✅ User ' + result.id + ' → Supabase');
             } catch(e) { console.error('❌ User Supabase:', e); }
         }
         return result;
     };
-})();
 
-// ============================================
-// OVERRIDE: db.updateUser
-// ============================================
-(function() {
-    var _orig = db.updateUser.bind(db);
-
+    // updateUser
+    var _origUpdateUser = db.updateUser.bind(db);
     db.updateUser = async function(id, updates) {
-        var result = await _orig(id, updates);
+        var result = await _origUpdateUser(id, updates);
         var su = {};
         if (updates.name !== undefined) su.name = updates.name;
         if (updates.email !== undefined) su.email = updates.email;
@@ -313,116 +247,46 @@ function ticketToSupabase(t) {
         }
         return result;
     };
-})();
 
-// ============================================
-// OVERRIDE: db.deleteUser
-// ============================================
-(function() {
-    var _orig = db.deleteUser.bind(db);
-
+    // deleteUser
+    var _origDeleteUser = db.deleteUser.bind(db);
     db.deleteUser = async function(id) {
-        await _orig(id);
-        // O original faz soft-delete (active=false), espelhamos isso
+        await _origDeleteUser(id);
         try { await supaRest.update('users', id, { active: false }); } catch(e) {}
     };
-})();
 
-// ============================================
-// ============================================
-// FIX CRÍTICO: Impedir que renderTicketDetail 
-// sobrescreva db.getMessages com versão bugada
-// ============================================
-(function() {
-    // Define db.getMessages como propriedade não-configurável
-    // Isso impede que o código bugado dentro de renderTicketDetail
-    // faça db.getMessages = function(...) { return (db.messages || [])... }
-    var _correctGetMessages = function(ticketId) {
-        return (db.data.messages || []).filter(function(m) {
-            return m.ticketId === ticketId;
-        }).sort(function(a, b) {
-            return new Date(a.createdAt) - new Date(b.createdAt);
-        });
-    };
-
-    try {
-       ;
-    } catch(e) {
-        // Fallback se defineProperty falhar
-        db.getMessages = _correctGetMessages;
-        console.warn('⚠️ db.getMessages definido sem proteção');
-    }
-})();
-
-
-// ============================================
-// CATALOG sync para Supabase
-// ============================================
-var _origSyncToGitHub = db.syncToGitHub.bind(db);
-db.syncToGitHub = async function(collection) {
-    // Chama o original (salva local + GitHub se configurado)
-    await _origSyncToGitHub(collection);
-
-    // Também sincroniza com Supabase
-    try {
-        if (collection === 'catalog') {
-            await supaRest.upsert('catalog', { id: 1, data: db.data.catalog });
-        } else if (collection === 'sla') {
-            // SLA é mais complexo — fazemos upsert individual
-            for (var i = 0; i < db.data.sla.length; i++) {
-                var s = db.data.sla[i];
-                await supaRest.upsert('sla', {
-                    id: s.id, name: s.name, hours: s.hours,
-                    count_weekends: s.countWeekends || false, active: s.active !== false
-                });
+    // syncToGitHub — also sync to Supabase
+    var _origSync = db.syncToGitHub.bind(db);
+    db.syncToGitHub = async function(collection) {
+        await _origSync(collection);
+        try {
+            if (collection === 'catalog') {
+                await supaRest.upsert('catalog', { id: 1, data: db.data.catalog });
+            } else if (collection === 'sla') {
+                for (var i = 0; i < db.data.sla.length; i++) {
+                    var s = db.data.sla[i];
+                    await supaRest.upsert('sla', { id: s.id, name: s.name, hours: s.hours, count_weekends: s.countWeekends || false, active: s.active !== false });
+                }
             }
-        }
-        // tickets, messages, users já são sincronizados pelos overrides individuais
-    } catch(e) {
-        console.error('Sync Supabase ' + collection + ':', e);
-    }
-};
+        } catch(e) { console.error('Sync Supabase ' + collection + ':', e); }
+    };
+})();
 
 // ============================================
-// ADMIN SETTINGS (sobrescreve a do app-bundle.js)
+// saveCatalogToSupabase (usado pelo features.js)
 // ============================================
-var _origRenderAdminSettings = typeof renderAdminSettings === 'function' ? renderAdminSettings : null;
-window.renderAdminSettings = function(container) {
-    if (!isAdmin()) return;
-    // Chama o original se existir (mostra config GitHub)
-    if (_origRenderAdminSettings) _origRenderAdminSettings(container);
+async function saveCatalogToSupabase() {
+    try { await supaRest.upsert('catalog', { id: 1, data: db.data.catalog }); }
+    catch(e) { console.error('❌ Catálogo:', e); }
+}
 
-    // Adiciona card do Supabase no topo
-    var supaCard = document.createElement('div');
-    supaCard.className = 'card';
-    supaCard.style.marginBottom = '24px';
-    supaCard.innerHTML = '<div class="card-header"><h3><i class="fas fa-database" style="margin-right:8px"></i> Supabase</h3></div>' +
-        '<div class="card-body">' +
-        '<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px;margin-bottom:12px;">' +
-        '<strong>✅ Conectado</strong> — fnihosrvwitlnnlcarpf</div>' +
-        '<p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">' +
-        'Users: ' + db.data.users.length + ' | Tickets: ' + db.data.tickets.length +
-        ' | Msgs: ' + db.data.messages.length + ' | Cats: ' + (db.data.catalog.categories?db.data.catalog.categories.length:0) + '</p>' +
-        '<button onclick="reloadFromSupabase()" class="btn btn-primary"><i class="fas fa-sync"></i> Recarregar do Supabase</button></div>';
-    container.insertBefore(supaCard, container.firstChild.nextSibling);
-};
-
+// ============================================
+// reloadFromSupabase
+// ============================================
 async function reloadFromSupabase() {
     showToast('Recarregando...', 'info');
     await loadFromSupabase();
     showToast('Dados recarregados!', 'success');
-    navigateTo('admin-settings');
 }
 
-// ============================================
-// ============================================
-// saveCatalogToSupabase (usado pelo features.js)
-
-// ============================================
-async function saveCatalogToSupabase() {
-    try {
-        await supaRest.upsert('catalog', { id: 1, data: db.data.catalog });
-    } catch(e) { console.error('❌ Catálogo:', e); }
-}
-
-console.log('✅ supabase-db.js v6 carregado (wrapper sobre app-bundle.js)');
+console.log('✅ supabase-db.js v7 carregado');
