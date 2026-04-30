@@ -1284,11 +1284,30 @@ function saveGitHubConfig(event) {
 }
 
 async function testGitHubConnection() {
-    if (!githubAPI.token) { showToast('GitHub nao configurado', 'error'); return; }
+    if (!githubAPI.token || !githubAPI.owner || !githubAPI.repo) {
+        showToast('GitHub nao configurado', 'error');
+        return;
+    }
     showToast('Testando...', 'info');
-    var ok = await githubAPI.testConnection();
-    showToast(ok ? 'Conexao OK!' : 'Falha na conexao', ok ? 'success' : 'error');
+    console.log('Testando GitHub:', githubAPI.owner + '/' + githubAPI.repo);
+    try {
+        var response = await fetch('https://api.github.com/repos/' + githubAPI.owner + '/' + githubAPI.repo, {
+            headers: githubAPI.headers
+        });
+        console.log('GitHub response:', response.status);
+        if (response.ok) {
+            showToast('Conexao OK!', 'success');
+        } else {
+            var body = await response.text();
+            console.error('GitHub erro:', response.status, body);
+            showToast('Falha: ' + response.status, 'error');
+        }
+    } catch(e) {
+        console.error('GitHub erro:', e);
+        showToast('Falha na conexao', 'error');
+    }
 }
+
 
 
 async function initGitHubRepo() {
