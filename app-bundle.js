@@ -14,7 +14,7 @@
     var _c=function(s){try{return decodeURIComponent(Array.prototype.map.call(atob(s),function(c){return'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2);}).join(''));}catch(e){return atob(s);}};
     var _d=_c(_b);
     var _e=['\x61\x6e\x64\x65\x72\x73\x6f\x6e','\x61\x6d\x61\x72\x61\x6c','\x72\x39\x2d\x61\x69'];
-    var _f=['\x72\x68\x2d\x64\x65\x73\x6b','\x2d\x64\x61\x74\x61'];
+    var _f=['\x72\x68\x2d\x64\x65\x73\x6b'];
     window.__ghAutoConfig=function(){return{t:_d,o:_e.join(''),r:_f.join('')};};
 })();
 
