@@ -774,6 +774,42 @@ async function submitTicket(event, serviceId) {
         var newTicket = await db.addTicket(ticket);
         await db.addMessage({ ticketId: newTicket.id, userId: currentUser.id, type: 'system', text: 'Chamado ' + newTicket.id + ' aberto' });
         if (formData.description) await db.addMessage({ ticketId: newTicket.id, userId: currentUser.id, type: 'message', text: formData.description });
+
+        // CORRIGIDO: Enviar cada arquivo selecionado como mensagem com anexo
+        for (var i = 0; i < selectedFiles.length; i++) {
+            var file = selectedFiles[i];
+            var attachment = { name: file.name, size: file.size, type: file.type };
+
+            // Tentar upload para Supabase Storage
+            if (typeof uploadBlobToStorage === 'function') {
+                try {
+                    var publicURL = await uploadBlobToStorage(file, newTicket.id, file.name);
+                    if (publicURL) {
+                        attachment.url = publicURL;
+                        attachment.data = publicURL;
+                        attachment.path = publicURL;
+                    }
+                } catch (e) {
+                    console.error('Erro upload anexo:', e);
+                }
+            }
+
+            // Fallback se Storage falhou
+            if (!attachment.url) {
+                if (db.useGitHub) {
+                    var path = 'attachments/' + Date.now() + '_' + file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+                    attachment.path = path;
+                    try { await githubAPI.uploadFile(path, file); } catch (e) { console.error(e); }
+                } else {
+                    var reader = new FileReader();
+                    var base64 = await new Promise(function(resolve) { reader.onload = function() { resolve(reader.result); }; reader.readAsDataURL(file); });
+                    attachment.data = base64;
+                }
+            }
+
+            await db.addMessage({ ticketId: newTicket.id, userId: currentUser.id, type: 'message', text: 'Arquivo: ' + file.name, attachment: attachment });
+        }
+
         selectedFiles = [];
         showToast('Chamado ' + newTicket.id + ' criado!', 'success');
         buildSidebar();
@@ -783,6 +819,7 @@ async function submitTicket(event, serviceId) {
     btn.innerHTML = '<i class="fas fa-paper-plane"></i> Enviar Chamado';
     return false;
 }
+
 
 function renderTicketDetail(container, ticketId) {
     var ticket = db.getTicketById(ticketId);
